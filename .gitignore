@@ -315,6 +315,10 @@ FakesAssemblies/
 .ntvs_analysis.dat
 node_modules/
 
+# portus build output and local artifacts
+/dist/
+scripts/.test.db*
+
 # Visual Studio 6 build log
 *.plg
 

@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <AssemblyName>Portus.Sidecar</AssemblyName>
+    <RootNamespace>Portus.Sidecar</RootNamespace>
+    <!-- NOTE: NativeAOT is intentionally not enabled. EF Core's SQLite provider
+         does not trim/AOT-compile cleanly; we publish self-contained single-file
+         instead (see CLAUDE.md › Build & Run). -->
+    <!-- Embed native libs (notably e_sqlite3.dll) INTO the single file so it
+         self-extracts at runtime. Without this they're left as loose siblings of
+         the exe and a DllNotFoundException follows if they get separated. -->
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.0" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,151 @@
+@import "tailwindcss";
+
+/* CSS-first theme tokens (Tailwind v4). These generate the bg-*, text-*,
+   border-* utilities used across the layout. */
+@theme {
+  --color-bg: #0d1117;
+  --color-panel: #11161d;
+  --color-edge: #21262d;
+  --color-fg: #e6edf3;
+  --color-muted: #7d8590;
+  --color-accent: #f78166;
+  --color-busy: #f78166;
+  --color-idle: #3fb950;
+
+  --font-sans: "Segoe UI", system-ui, -apple-system, sans-serif;
+  --font-mono: "Cascadia Code", "Cascadia Mono", "JetBrains Mono", "Fira Code", Menlo, Consolas, "Courier New", monospace;
+}
+
+/* Each terminal fills its pane's stack; only the active one is visible. */
+.term-host {
+  position: absolute;
+  inset: 0;
+  padding: 4px 6px;
+}
+.term-host[hidden] {
+  display: none;
+}
+
+/* --- Resizable splitters --------------------------------------------------
+   One gutter style for both the outer 3-pane columns and the inner layout
+   gutters. Thin and edge-colored; brightens on hover/drag. */
+.gutter-col,
+.gutter-row {
+  background: var(--color-edge);
+  transition: background 0.12s ease;
+  z-index: 10;
+}
+.gutter-col {
+  cursor: col-resize;
+}
+.gutter-row {
+  cursor: row-resize;
+}
+.gutter-col:hover,
+.gutter-row:hover,
+body.resizing .gutter-col,
+body.resizing .gutter-row {
+  background: var(--color-accent);
+}
+/* While dragging, xterm's canvas would otherwise swallow pointer moves. */
+body.resizing {
+  cursor: inherit;
+  user-select: none;
+}
+body.resizing .term-host {
+  pointer-events: none;
+}
+
+/* --- Layout panes ---------------------------------------------------------
+   Each section of a quad/six layout is a slot holding one Pane's tab bar +
+   terminal stack. The accent ring marks the active pane (multi-pane only). */
+.pane-slot {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+.pane-active {
+  box-shadow: inset 0 0 0 1px var(--color-accent);
+}
+
+/* Pulsing dot for the "busy" tab indicator. */
+@keyframes portus-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+.dot-busy {
+  animation: portus-pulse 1s ease-in-out infinite;
+}
+
+/* xterm scrollbar polish */
+.xterm .xterm-viewport::-webkit-scrollbar {
+  width: 10px;
+}
+.xterm .xterm-viewport::-webkit-scrollbar-thumb {
+  background: var(--color-edge);
+  border-radius: 5px;
+}
+.xterm .xterm-viewport::-webkit-scrollbar-thumb:hover {
+  background: var(--color-muted);
+}
+
+/* Themed, auto-hiding scrollbars for the side panes (folder tree, session list).
+   Track stays invisible; the thumb only fades in while the pointer is over the
+   pane, and brightens when hovered directly. */
+.scroll-area {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+  transition: scrollbar-color 0.15s ease;
+}
+.scroll-area:hover {
+  scrollbar-color: var(--color-edge) transparent;
+}
+.scroll-area::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+.scroll-area::-webkit-scrollbar-track {
+  background: transparent;
+}
+.scroll-area::-webkit-scrollbar-thumb {
+  background: transparent;
+  border: 2px solid transparent;
+  border-radius: 5px;
+  background-clip: padding-box;
+}
+.scroll-area:hover::-webkit-scrollbar-thumb {
+  background: var(--color-edge);
+  background-clip: padding-box;
+}
+.scroll-area::-webkit-scrollbar-thumb:hover {
+  background: var(--color-muted);
+  background-clip: padding-box;
+}
+
+/* Tab bar: horizontal-only, thin themed scrollbar — never show a vertical one. */
+.tab-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+.tab-scroll:hover {
+  scrollbar-color: var(--color-edge) transparent;
+}
+.tab-scroll::-webkit-scrollbar {
+  height: 6px;
+}
+.tab-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.tab-scroll::-webkit-scrollbar-thumb {
+  background: transparent;
+  border-radius: 3px;
+}
+.tab-scroll:hover::-webkit-scrollbar-thumb {
+  background: var(--color-edge);
+}
