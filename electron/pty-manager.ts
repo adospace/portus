@@ -23,6 +23,13 @@ interface Session {
   status: SessionStatus;
   idleTimer: NodeJS.Timeout | null;
   sawOutput: boolean;
+  // Output coalescing: PTY output (incl. each keystroke's prompt redraw) often
+  // arrives as a burst of small chunks. Buffer them and flush once per event-loop
+  // turn so the renderer gets one IPC message + one render + one busy-detection
+  // pass per burst instead of per chunk — which keeps the renderer thread free to
+  // dispatch the user's next keystroke.
+  pending: string[];
+  flushScheduled: boolean;
 }
 
 function defaultShell(): string {
@@ -64,11 +71,14 @@ export class PtyManager {
       status: 'idle',
       idleTimer: null,
       sawOutput: false,
+      pending: [],
+      flushScheduled: false,
     };
     this.sessions.set(id, session);
 
     proc.onData((data) => this.handleData(session, data));
     proc.onExit(({ exitCode }) => {
+      this.flush(session); // drain any buffered output before the tab goes away
       this.clearIdleTimer(session);
       this.sessions.delete(id);
       this.listeners.onExit(id, exitCode);
@@ -106,6 +116,21 @@ export class PtyManager {
   }
 
   private handleData(session: Session, data: string): void {
+    session.pending.push(data);
+    if (session.flushScheduled) return;
+    session.flushScheduled = true;
+    // setImmediate fires after the current I/O batch, so every chunk node-pty
+    // delivered in this loop turn coalesces into one flush — near-zero added
+    // latency, but the renderer sees one event per burst instead of many.
+    setImmediate(() => this.flush(session));
+  }
+
+  private flush(session: Session): void {
+    session.flushScheduled = false;
+    if (session.pending.length === 0) return;
+    const data = session.pending.length === 1 ? session.pending[0]! : session.pending.join('');
+    session.pending.length = 0;
+
     this.listeners.onData(session.id, data);
     session.sawOutput = true;
 

@@ -9,6 +9,14 @@ import { PtyManager } from './pty-manager.js';
 import { SidecarClient } from './sidecar.js';
 import { Channels, type DirEntry, type Drive, type PersistedSession, type SpawnRequest } from './ipc.js';
 
+// On some Windows GPU/driver combos the compositor locks the WebGL present path
+// to half refresh (~30fps) whenever the terminal canvas redraws every frame — so
+// fast typing surfaces 2-3 chars per visual frame and feels laggy, even though the
+// keystroke→echo round trip is ~5ms. Lifting the vsync / frame-rate throttle lets
+// the renderer present each change immediately. Must be set before app ready.
+app.commandLine.appendSwitch('disable-gpu-vsync');
+app.commandLine.appendSwitch('disable-frame-rate-limit');
+
 let win: BrowserWindow | null = null;
 let pty: PtyManager;
 const sidecar = new SidecarClient();

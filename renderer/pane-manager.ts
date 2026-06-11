@@ -29,6 +29,10 @@ export class PaneManager {
   private active: Pane | null = null;
   private readonly ptyIndex = new Map<string, Pane>();
   private homeDir = '';
+  // Status-bar value spans, resolved once. Re-querying the document on every
+  // status transition (which fires on PTY output) competes with keystroke
+  // dispatch on the renderer's single main thread and makes typing feel laggy.
+  private readonly statusEls = new Map<string, HTMLElement>();
 
   constructor(private readonly opts: PaneManagerOpts) {}
 
@@ -232,27 +236,41 @@ export class PaneManager {
   }
 
   private statusValue(id: string): HTMLElement {
-    return $(`#${id}`).querySelector('span:last-child') as HTMLElement;
+    let el = this.statusEls.get(id);
+    if (!el) {
+      el = $(`#${id}`).querySelector('span:last-child') as HTMLElement;
+      this.statusEls.set(id, el);
+    }
+    return el;
+  }
+
+  /** Write text only if it changed — avoids redundant layout/paint on the hot path. */
+  private setText(el: HTMLElement, text: string): void {
+    if (el.textContent !== text) el.textContent = text;
   }
 
   paintStatusBar(): void {
     const tab = this.active?.activeTab() ?? null;
-    this.statusValue('status-folder').textContent = tab ? tab.folder : '—';
-    this.statusValue('status-cost').textContent = tab ? tab.totalCost.toFixed(4) : '0.0000';
-    this.statusValue('status-model').textContent = tab ? 'claude' : '—';
-    this.statusValue('status-elapsed').textContent =
-      tab && tab.busyStart ? fmtElapsed(Date.now() - tab.busyStart) : '—';
+    this.setText(this.statusValue('status-folder'), tab ? tab.folder : '—');
+    this.setText(this.statusValue('status-cost'), tab ? tab.totalCost.toFixed(4) : '0.0000');
+    this.setText(this.statusValue('status-model'), tab ? 'claude' : '—');
+    this.setText(
+      this.statusValue('status-elapsed'),
+      tab && tab.busyStart ? fmtElapsed(Date.now() - tab.busyStart) : '—',
+    );
   }
 
   /** Tick elapsed timers across all panes (called on an interval). */
   tickElapsed(): void {
     for (const pane of this.panes) {
       for (const tab of pane.tabList()) {
-        tab.elapsedEl.textContent = tab.busyStart ? fmtElapsed(Date.now() - tab.busyStart) : '';
+        this.setText(tab.elapsedEl, tab.busyStart ? fmtElapsed(Date.now() - tab.busyStart) : '');
       }
     }
     const active = this.active?.activeTab();
-    this.statusValue('status-elapsed').textContent =
-      active && active.busyStart ? fmtElapsed(Date.now() - active.busyStart) : '—';
+    this.setText(
+      this.statusValue('status-elapsed'),
+      active && active.busyStart ? fmtElapsed(Date.now() - active.busyStart) : '—',
+    );
   }
 }
