@@ -5,6 +5,9 @@
 
 <img width="1400" height="900" alt="Screenshot 2026-06-12 144524" src="https://github.com/user-attachments/assets/5c1a6a3a-e944-4d1c-988a-6f949dbd86a7" />
 
+<img width="1400" height="900" alt="image" src="https://github.com/user-attachments/assets/6250fecd-f207-4000-b91f-81ba44273c92" />
+
+
 ## What is portus?
 
 **portus** is a standalone cross-platform desktop app (Windows + macOS) that acts as
