@@ -130,6 +130,9 @@ The three panes are: **folder tree** (left) → **terminal tabs + status bar**
 │   ├── SessionStore.cs   # EF Core + SQLite (Session entity, DbContext, CRUD)
 │   ├── PipeServer.cs     # NDJSON over named pipe (win) / Unix socket (mac)
 │   └── UsageTracker.cs
+├── .github/workflows/
+│   └── release.yml       # CI: on v* tag → build win+mac, publish to GitHub Releases
+├── electron-builder.yml  # packaging: NSIS (win) + dmg/zip (mac); asar:false, npmRebuild:false
 ├── tsconfig.json
 ├── CLAUDE.md             # this file
 └── package.json
@@ -252,6 +255,28 @@ smoke test), `npm run sidecar:build:mac` (osx-arm64 publish).
 - `scripts/start.mjs` strips `--openssl-legacy-provider` from `NODE_OPTIONS` before
   spawning Electron (some dev machines set it globally; Electron refuses to start
   with it).
+
+### Packaging & Release
+- **electron-builder** (`electron-builder.yml`) packages distributables: a Windows
+  NSIS installer (`portus-Setup-<version>.exe`) and a macOS `dmg`+`zip` (arm64).
+  Local builds: `npm run dist:win` / `npm run dist:mac` (each runs `build` +
+  the matching `sidecar:build*` first); output → `release/`.
+- Two config choices are load-bearing, **do not flip them**:
+  - `asar: false` — `sidecar.ts` resolves the sidecar exe via
+    `app.getAppPath()+'/dist/sidecar/…'` and `spawn`s it; node-pty is a native addon.
+    Both must be real on-disk files, not asar entries.
+  - `npmRebuild: false` — node-pty's N-API prebuilds are ABI-stable across Electron,
+    so no rebuild is needed (and the design assumes none).
+- electron-builder auto-collects the **production** dependency tree from
+  `node_modules` (node-pty); dev deps are excluded. The platform-correct sidecar must
+  already be published into `dist/sidecar/` before electron-builder runs.
+- **CI release** (`.github/workflows/release.yml`): pushing a `v*` tag builds on
+  `windows-latest` + `macos-latest` (matrix), publishes installers to GitHub Releases
+  via `softprops/action-gh-release` (uses the auto-provided `GITHUB_TOKEN`; no secrets
+  to set). Cut a release with `npm version <patch|minor|major>` then
+  `git push --follow-tags` — this keeps `package.json` version (which names the
+  artifacts) in sync with the release tag. macOS builds are **unsigned** (Gatekeeper
+  warns); add an Apple cert + notarization if that matters.
 
 ## Open Questions for Implementation
 1. Best way to detect Claude session ID from PTY output (does `claude --resume` print

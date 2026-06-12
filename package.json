@@ -3,6 +3,15 @@
   "version": "0.1.0",
   "description": "portus — agentic terminal: mission control for multiple AI agent CLI sessions",
   "license": "MIT",
+  "author": "Adolfo Marinucci",
+  "homepage": "https://github.com/adospace/portus",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/adospace/portus.git"
+  },
+  "bugs": {
+    "url": "https://github.com/adospace/portus/issues"
+  },
   "main": "dist/electron/main.js",
   "scripts": {
     "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
@@ -14,7 +23,10 @@
     "sidecar:build": "dotnet publish sidecar/Portus.Sidecar.csproj -c Release -r win-x64 --self-contained -p:PublishSingleFile=true -o dist/sidecar",
     "sidecar:build:mac": "dotnet publish sidecar/Portus.Sidecar.csproj -c Release -r osx-arm64 --self-contained -p:PublishSingleFile=true -o dist/sidecar",
     "start": "npm run build && node scripts/start.mjs",
-    "dev": "npm run build && node scripts/start.mjs"
+    "dev": "npm run build && node scripts/start.mjs",
+    "pack": "electron-builder --publish never",
+    "dist:win": "npm run build && npm run sidecar:build && electron-builder --win --publish never",
+    "dist:mac": "npm run build && npm run sidecar:build:mac && electron-builder --mac --publish never"
   },
   "dependencies": {
     "node-pty": "^1.0.0"
@@ -28,6 +40,7 @@
     "@xterm/addon-webgl": "^0.18.0",
     "@xterm/xterm": "^5.5.0",
     "electron": "^33.0.0",
+    "electron-builder": "^25.1.8",
     "esbuild": "^0.24.0",
     "tailwindcss": "^4.0.0",
     "typescript": "^5.6.0"

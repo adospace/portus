@@ -1,0 +1,82 @@
+name: Build & Release
+
+# Builds portus for Windows + macOS whenever a v* tag is pushed and publishes the
+# installers to the repo's GitHub Releases. To cut a release:
+#   npm version patch   # bumps package.json + creates a vX.Y.Z tag
+#   git push --follow-tags
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build (${{ matrix.artifact }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            sidecar: sidecar:build      # win-x64 self-contained single-file
+            artifact: windows
+          - os: macos-latest            # arm64 runner — matches osx-arm64 sidecar
+            sidecar: sidecar:build:mac
+            artifact: macos
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build .NET sidecar
+        run: npm run ${{ matrix.sidecar }}
+
+      - name: Build renderer + main (esbuild + Tailwind)
+        run: npm run build
+
+      - name: Package with electron-builder
+        run: npx electron-builder --publish never
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: |
+            release/*.exe
+            release/*.dmg
+            release/*.zip
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all installers
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create / update release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: portus ${{ github.ref_name }}
+          files: artifacts/**/*
+          generate_release_notes: true
+          fail_on_unmatched_files: true

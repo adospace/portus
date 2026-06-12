@@ -1,0 +1,51 @@
+# electron-builder packaging config for portus.
+# Produces a Windows NSIS installer and a macOS dmg/zip. Invoked by
+# `npm run dist:win` / `dist:mac` locally and by .github/workflows/release.yml in CI.
+appId: com.adospace.portus
+productName: portus
+copyright: Copyright © 2026 Adolfo Marinucci
+
+# Tie release artifacts (and the Windows uninstaller's support link) to the repo.
+publish:
+  provider: github
+  owner: adospace
+  repo: portus
+
+# asar:false — the .NET sidecar (dist/sidecar/Portus.Sidecar[.exe]) and the native
+# node-pty addon are spawned/loaded from disk. sidecar.ts resolves them via
+# app.getAppPath()+'/dist/sidecar/…', which must be a real file, not an asar entry.
+asar: false
+
+# node-pty ships N-API prebuilds that are ABI-stable across Node/Electron, so no
+# native rebuild is needed (and the design assumes none). Skip it to keep CI fast
+# and deterministic.
+npmRebuild: false
+
+directories:
+  output: release
+  buildResources: build
+
+# App files to ship. electron-builder additionally collects the production
+# dependency tree from node_modules (node-pty) automatically; dev deps are excluded.
+files:
+  - dist/**/*
+  - package.json
+  - "!**/*.map"
+  - "!**/*.ts"
+
+win:
+  target:
+    - nsis
+  artifactName: ${productName}-Setup-${version}.${ext}
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+
+mac:
+  target:
+    - dmg
+    - zip
+  category: public.app-category.developer-tools
+  artifactName: ${productName}-${version}-${arch}.${ext}
