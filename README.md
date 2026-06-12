@@ -3,17 +3,7 @@
 > Mission control for multiple AI agent CLI sessions. Run every agent in one
 > focused, three-pane window and watch them all at a glance.
 
-<!-- ============================================================= -->
-<!-- SCREENSHOTS — replace the placeholders below with real images -->
-<!-- ============================================================= -->
-
-<p align="center">
-  <img src="docs/screenshot-main.png" alt="portus main window" width="800">
-  <br>
-  <em>Screenshot placeholder — drop images in <code>docs/</code> and update these paths.</em>
-</p>
-
----
+<img width="1400" height="900" alt="Screenshot 2026-06-12 144524" src="https://github.com/user-attachments/assets/5c1a6a3a-e944-4d1c-988a-6f949dbd86a7" />
 
 ## What is portus?
 
