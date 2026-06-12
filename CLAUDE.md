@@ -98,6 +98,28 @@ The three panes are: **folder tree** (left) → **terminal tabs + status bar**
   sidesteps the brittle prompt-string parsing in the original design; swap in
   prompt-marker detection (`✦`/`>`) here if it proves more reliable.
 
+### Settings
+- **Where.** Opened from the gear button (titlebar, top-right) or **File ▸ Settings**;
+  both call `PaneManager.openSettings()`, which opens a single **Settings tab** in the
+  active ("first available") pane — or just focuses it if one already exists.
+- **Settings tab is a non-terminal view.** A Pane tab's content is a `TabContent`
+  (`pane.ts`): `TerminalTab` for real PTYs, `SettingsView` (`settings-view.ts`) for the
+  Settings panel — same `show/hide/reparent/fit/dispose` surface, so the pane relocates
+  it across layout changes like any tab. `Tab.kind` (`'terminal' | 'settings'`) gates the
+  PTY-only paths: status-dot painting, the fit→resize call, and `pty.kill` on close all
+  skip non-terminal tabs. The Settings tab uses the synthetic id `'settings'` (no PTY).
+  Its UI is a left nav (section list) + right content; today one section, **Commands**.
+- **Persistence.** The main process owns `settings.json` in `app.getPath('userData')`
+  (`settings:get`/`settings:save` channels in `ipc.ts`); first run / unreadable file →
+  `DEFAULT_SETTINGS`. The renderer's `SettingsStore` (`settings-store.ts`) caches it and
+  is the live source the folder tree and the `+` menu read from.
+- **Commands.** A user list of `{ name, command }` launch presets (`DEFAULT_COMMANDS` in
+  `ipc.ts` seeds claude / codex / shell / build examples). They populate the shared
+  `command-menu.ts` popup, shown from the folder-tree right-click **and** the pane `+`
+  button (replacing the old hard-coded "New session here"). Picking one runs its command
+  in a fresh console via `createSession(folder, { command })`; an empty command (`''`)
+  means a plain shell (`pty-manager` skips the startup write).
+
 ## File Structure
 
 ```
@@ -115,10 +137,13 @@ The three panes are: **folder tree** (left) → **terminal tabs + status bar**
 │   ├── pane-manager.ts   # owns Pane[], active pane, ptyId→Pane routing, sessions, status bar
 │   ├── layout.ts         # LayoutManager: single/quad/six grids + inner gutters
 │   ├── splitter.ts       # reusable drag-to-resize gutter (outer panes + inner layout)
-│   ├── titlebar.ts       # custom window chrome: File▸Exit, layout selector, win controls
+│   ├── titlebar.ts       # custom window chrome: File▸{Settings,Exit}, gear btn, layout selector, win controls
 │   ├── terminal-tab.ts   # xterm.js wrapper (fit + web-links + WebGL addons; reparent)
 │   ├── folder-tree.ts    # left pane: drive/volume selector + lazy dir tree (fs.drives)
 │   ├── session-list.ts   # right pane
+│   ├── settings-store.ts # in-memory holder for user settings (loads/saves via window.api.settings)
+│   ├── settings-view.ts  # Settings tab content: left nav + section editors (Commands)
+│   ├── command-menu.ts   # shared popup listing launch commands (+ button & folder-tree menu)
 │   ├── global.d.ts       # ambient window.api type + lucide json module decl
 │   └── styles.css        # Tailwind v4 entry (@import "tailwindcss")
 ├── scripts/

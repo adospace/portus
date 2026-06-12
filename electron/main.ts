@@ -2,12 +2,20 @@
 // SidecarClient, and wires the renderer's IPC calls to both. The renderer never
 // touches node-pty or the sidecar socket directly — everything is brokered here.
 import { app, BrowserWindow, ipcMain, type IpcMainInvokeEvent } from 'electron';
-import { access, readdir } from 'node:fs/promises';
+import { access, readdir, readFile, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { PtyManager } from './pty-manager.js';
 import { SidecarClient } from './sidecar.js';
-import { Channels, type DirEntry, type Drive, type PersistedSession, type SpawnRequest } from './ipc.js';
+import {
+  Channels,
+  DEFAULT_SETTINGS,
+  type AppSettings,
+  type DirEntry,
+  type Drive,
+  type PersistedSession,
+  type SpawnRequest,
+} from './ipc.js';
 
 // On some Windows GPU/driver combos the compositor locks the WebGL present path
 // to half refresh (~30fps) whenever the terminal canvas redraws every frame — so
@@ -128,6 +136,22 @@ function registerIpc(): void {
   ipcMain.handle(Channels.usageAdd, (_e, sessionId: string, tIn: number, tOut: number) =>
     sidecar.addUsage(sessionId, tIn, tOut),
   );
+
+  // User settings live as a JSON file in the per-user app data dir, so they
+  // survive restarts independently of the sidecar's SQLite session store.
+  const settingsPath = (): string => join(app.getPath('userData'), 'settings.json');
+  ipcMain.handle(Channels.settingsGet, async (): Promise<AppSettings> => {
+    try {
+      const parsed = JSON.parse(await readFile(settingsPath(), 'utf8')) as Partial<AppSettings>;
+      return { commands: Array.isArray(parsed.commands) ? parsed.commands : DEFAULT_SETTINGS.commands };
+    } catch {
+      // No file yet (first run) or unreadable/corrupt — fall back to defaults.
+      return DEFAULT_SETTINGS;
+    }
+  });
+  ipcMain.handle(Channels.settingsSave, async (_e, settings: AppSettings): Promise<void> => {
+    await writeFile(settingsPath(), JSON.stringify(settings, null, 2), 'utf8');
+  });
 
   ipcMain.on(Channels.winMinimize, () => win?.minimize());
   ipcMain.on(Channels.winMaximizeToggle, () => {

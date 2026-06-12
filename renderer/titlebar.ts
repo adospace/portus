@@ -16,7 +16,10 @@ export class TitleBar {
   private menu: HTMLElement | null = null;
   private readonly layoutBtns: HTMLButtonElement[];
 
-  constructor(private readonly onLayoutChange: (mode: LayoutMode) => void) {
+  constructor(
+    private readonly onLayoutChange: (mode: LayoutMode) => void,
+    private readonly onOpenSettings: () => void,
+  ) {
     const isMac = window.api.platform === 'darwin';
 
     // Window controls — Windows/Linux only; macOS uses native traffic lights.
@@ -39,6 +42,11 @@ export class TitleBar {
       window.api.win.onMaximizedChanged(paintMax);
       void window.api.win.isMaximized().then(paintMax);
     }
+
+    // Gear button → Settings tab.
+    document
+      .getElementById('open-settings')
+      ?.addEventListener('click', () => this.onOpenSettings());
 
     // File menu.
     const fileBtn = document.getElementById('menu-file');
@@ -83,6 +91,18 @@ export class TitleBar {
     menu.style.top = `${y}px`;
     menu.addEventListener('click', (e) => e.stopPropagation());
 
+    const settings = document.createElement('button');
+    settings.className = 'flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-edge/60';
+    settings.innerHTML =
+      '<span class="iconify" data-icon="lucide:settings"></span><span>Settings</span>';
+    settings.addEventListener('click', () => {
+      this.closeMenu();
+      this.onOpenSettings();
+    });
+
+    const sep = document.createElement('div');
+    sep.className = 'my-1 border-t border-edge';
+
     const exit = document.createElement('button');
     exit.className = 'flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-edge/60';
     exit.innerHTML =
@@ -92,7 +112,7 @@ export class TitleBar {
       window.api.app.quit();
     });
 
-    menu.appendChild(exit);
+    menu.append(settings, sep, exit);
     document.body.appendChild(menu);
     this.menu = menu;
   }

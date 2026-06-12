@@ -4,6 +4,7 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import {
   Channels,
+  type AppSettings,
   type DirEntry,
   type Drive,
   type PersistedSession,
@@ -51,6 +52,11 @@ const api = {
   usage: {
     add: (sessionId: string, tokensIn: number, tokensOut: number): Promise<PersistedSession> =>
       ipcRenderer.invoke(Channels.usageAdd, sessionId, tokensIn, tokensOut),
+  },
+  settings: {
+    get: (): Promise<AppSettings> => ipcRenderer.invoke(Channels.settingsGet),
+    save: (settings: AppSettings): Promise<void> =>
+      ipcRenderer.invoke(Channels.settingsSave, settings),
   },
   win: {
     minimize: (): void => ipcRenderer.send(Channels.winMinimize),

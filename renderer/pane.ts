@@ -4,10 +4,27 @@
 // owns the set of panes and routes PTY events; a Pane only manages its own DOM
 // and tab set, delegating privileged work (spawn/kill/resize, status bar) back
 // to the manager through callbacks.
-import { TerminalTab } from './terminal-tab';
 import type { SessionStatus } from '../electron/ipc';
 
+/**
+ * The minimal surface a Pane needs from whatever fills a tab — a real terminal
+ * (TerminalTab) or a special view like the Settings panel (SettingsView). `feed`
+ * is terminal-only and therefore optional.
+ */
+export interface TabContent {
+  show(): void;
+  hide(): void;
+  reparent(parent: HTMLElement): void;
+  fit(): { cols: number; rows: number };
+  dispose(): void;
+  feed?(data: string): void;
+}
+
+/** What kind of content a tab holds — terminals route PTY events, views don't. */
+export type TabKind = 'terminal' | 'settings';
+
 export interface Tab {
+  kind: TabKind;
   persistentId: string;
   ptyId: string;
   folder: string;
@@ -15,7 +32,7 @@ export interface Tab {
   busyStart: number | null;
   totalCost: number;
   totalTokens: number;
-  term: TerminalTab;
+  term: TabContent;
   btn: HTMLButtonElement;
   dot: HTMLElement;
   elapsedEl: HTMLElement;
@@ -26,8 +43,8 @@ export interface PaneCallbacks {
   onActivated: (pane: Pane) => void;
   /** This pane's active tab changed — repaint the status bar if it's active. */
   onTabActivated: (pane: Pane, ptyId: string) => void;
-  /** The + button was clicked. */
-  onNewTab: (pane: Pane) => void;
+  /** The + button was clicked; `anchor` is the button, for positioning a menu. */
+  onNewTab: (pane: Pane, anchor: HTMLElement) => void;
   /** A tab button was clicked — resolve owning pane via the manager's index. */
   onTabClicked: (ptyId: string) => void;
   /** The close (×) on a tab was clicked. */
@@ -73,7 +90,7 @@ export class Pane {
     this.newTabBtn.className =
       'flex items-center justify-center w-8 shrink-0 text-muted hover:text-fg';
     setIcon(this.newTabBtn, 'lucide:plus');
-    this.newTabBtn.addEventListener('click', () => this.cb.onNewTab(this));
+    this.newTabBtn.addEventListener('click', () => this.cb.onNewTab(this, this.newTabBtn));
     this.tabBarEl.appendChild(this.newTabBtn);
 
     this.stackEl = document.createElement('div');
@@ -183,6 +200,7 @@ export class Pane {
   // --- painting ---------------------------------------------------------
 
   paintStatus(tab: Tab): void {
+    if (tab.kind !== 'terminal') return; // views carry a static icon, not a status dot
     const map: Record<SessionStatus, { icon: string; color: string; busy: boolean }> = {
       busy: { icon: 'lucide:circle', color: 'text-busy', busy: true },
       idle: { icon: 'lucide:circle-dashed', color: 'text-muted', busy: false },
@@ -212,7 +230,7 @@ export class Pane {
 
   private fitTab(tab: Tab): void {
     const dims = tab.term.fit();
-    this.cb.resize(tab.ptyId, dims.cols, dims.rows);
+    if (tab.kind === 'terminal') this.cb.resize(tab.ptyId, dims.cols, dims.rows);
   }
 
   private buildTabButton(tab: Tab): void {
@@ -220,14 +238,6 @@ export class Pane {
     btn.className =
       'group flex items-center gap-2 px-3 h-7 my-1 rounded text-sm whitespace-nowrap ' +
       'border border-transparent hover:border-edge';
-
-    tab.dot.className = 'shrink-0 flex items-center';
-    setIcon(tab.dot, 'lucide:circle');
-
-    const name = document.createElement('span');
-    name.textContent = baseName(tab.folder);
-
-    tab.elapsedEl.className = 'text-xs text-muted tabular-nums';
 
     const close = document.createElement('span');
     close.className =
@@ -237,8 +247,26 @@ export class Pane {
       e.stopPropagation();
       this.cb.onCloseTab(tab.ptyId);
     });
+    btn.addEventListener('click', () => this.cb.onTabClicked(tab.ptyId));
+
+    // Non-terminal views (Settings) get a static icon + fixed label, no elapsed.
+    if (tab.kind === 'settings') {
+      tab.dot.className = 'shrink-0 flex items-center text-muted';
+      setIcon(tab.dot, 'lucide:settings');
+      const name = document.createElement('span');
+      name.textContent = 'Settings';
+      btn.replaceChildren(tab.dot, name, close);
+      return;
+    }
+
+    tab.dot.className = 'shrink-0 flex items-center';
+    setIcon(tab.dot, 'lucide:circle');
+
+    const name = document.createElement('span');
+    name.textContent = baseName(tab.folder);
+
+    tab.elapsedEl.className = 'text-xs text-muted tabular-nums';
 
     btn.replaceChildren(tab.dot, name, tab.elapsedEl, close);
-    btn.addEventListener('click', () => this.cb.onTabClicked(tab.ptyId));
   }
 }

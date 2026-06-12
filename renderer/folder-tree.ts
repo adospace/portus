@@ -2,7 +2,8 @@
 // (Windows drive letters, macOS volumes), defaulting to the drive that holds the
 // user's home folder. Directories expand on click and load their children on
 // demand. Right-clicking a directory opens a context menu to start a session there.
-import type { DirEntry, Drive } from '../electron/ipc';
+import type { CommandPreset, DirEntry, Drive } from '../electron/ipc';
+import { openCommandMenu } from './command-menu';
 
 // Iconify swaps each `.iconify` placeholder for a fresh SVG, so writing
 // `dataset.icon` on the original span has no effect. Render into a stable wrapper
@@ -29,15 +30,14 @@ function pickDefaultDrive(drives: Drive[], home: string): Drive | undefined {
 
 export class FolderTree {
   private readonly root: HTMLElement;
-  private menu: HTMLElement | null = null;
 
   constructor(
     container: HTMLElement,
     private readonly driveSelect: HTMLSelectElement,
-    private readonly onNewSession: (folder: string) => void,
+    private readonly getCommands: () => CommandPreset[],
+    private readonly onRunCommand: (folder: string, command: string) => void,
   ) {
     this.root = container;
-    document.addEventListener('click', () => this.closeMenu());
     this.driveSelect.addEventListener('change', () => {
       void this.setRoot(this.driveSelect.value);
     });
@@ -146,28 +146,6 @@ export class FolderTree {
   }
 
   private openMenu(x: number, y: number, folder: string): void {
-    this.closeMenu();
-    const menu = document.createElement('div');
-    menu.className =
-      'fixed z-50 min-w-44 rounded-md border border-edge bg-panel py-1 shadow-lg text-sm';
-    menu.style.left = `${x}px`;
-    menu.style.top = `${y}px`;
-
-    const item = document.createElement('button');
-    item.className = 'flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-edge/60';
-    item.innerHTML = '<span class="iconify" data-icon="lucide:terminal"></span><span>New session here</span>';
-    item.addEventListener('click', () => {
-      this.closeMenu();
-      this.onNewSession(folder);
-    });
-
-    menu.appendChild(item);
-    document.body.appendChild(menu);
-    this.menu = menu;
-  }
-
-  private closeMenu(): void {
-    this.menu?.remove();
-    this.menu = null;
+    openCommandMenu(x, y, this.getCommands(), (cmd) => this.onRunCommand(folder, cmd.command));
   }
 }

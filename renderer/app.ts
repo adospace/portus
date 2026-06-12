@@ -10,6 +10,7 @@ import { PaneManager } from './pane-manager';
 import { LayoutManager } from './layout';
 import { TitleBar } from './titlebar';
 import { Splitter } from './splitter';
+import { SettingsStore } from './settings-store';
 
 Iconify.addCollection(lucide);
 
@@ -19,6 +20,8 @@ const $ = <T extends HTMLElement>(sel: string): T => {
   return el;
 };
 
+const settingsStore = new SettingsStore();
+
 const sessionList = new SessionList(
   $('#session-list'),
   (s) => void paneManager.createSession(s.folder, { persistentId: s.id, claudeId: s.claudeId }),
@@ -26,16 +29,21 @@ const sessionList = new SessionList(
 
 const paneManager = new PaneManager({
   onSessionsChanged: () => sessionList.refresh(),
+  settings: settingsStore,
 });
 
 const layout = new LayoutManager($('#layout-grid'), paneManager);
 
-new TitleBar((mode) => layout.setMode(mode));
+new TitleBar(
+  (mode) => layout.setMode(mode),
+  () => paneManager.openSettings(),
+);
 
 const folderTree = new FolderTree(
   $('#folder-tree'),
   $<HTMLSelectElement>('#drive-select'),
-  (folder) => void paneManager.createSession(folder),
+  () => settingsStore.commands(),
+  (folder, command) => void paneManager.createSession(folder, { command }),
 );
 
 // --- Outer 3-pane resize ---------------------------------------------------
@@ -83,6 +91,7 @@ setInterval(() => paneManager.tickElapsed(), 250);
 async function init(): Promise<void> {
   wireEvents();
   installOuterSplitters();
+  await settingsStore.load();
   paneManager.setHomeDir(await window.api.fs.home());
   await folderTree.init();
   await sessionList.refresh();

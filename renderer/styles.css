@@ -26,6 +26,17 @@
   display: none;
 }
 
+/* Settings tab content fills its pane's stack like a terminal; only the active
+   tab is visible. */
+.settings-host {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+.settings-host[hidden] {
+  display: none;
+}
+
 /* --- Resizable splitters --------------------------------------------------
    One gutter style for both the outer 3-pane columns and the inner layout
    gutters. Thin and edge-colored; brightens on hover/drag. */

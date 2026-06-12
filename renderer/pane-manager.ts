@@ -5,6 +5,12 @@
 import { TerminalTab } from './terminal-tab';
 import { Pane } from './pane';
 import type { Tab } from './pane';
+import { SettingsView } from './settings-view';
+import { openCommandMenu } from './command-menu';
+import type { SettingsStore } from './settings-store';
+
+/** Synthetic, app-wide id for the single Settings tab (it has no PTY). */
+const SETTINGS_ID = 'settings';
 
 const $ = <T extends HTMLElement>(sel: string): T => {
   const el = document.querySelector<T>(sel);
@@ -22,6 +28,8 @@ function fmtElapsed(ms: number): string {
 export interface PaneManagerOpts {
   /** Called after sessions are created/updated so the history pane refreshes. */
   onSessionsChanged: () => void | Promise<void>;
+  /** Settings store — source of the launch commands and the Settings tab editor. */
+  settings: SettingsStore;
 }
 
 export class PaneManager {
@@ -87,9 +95,12 @@ export class PaneManager {
       onTabActivated: (pane, id) => {
         if (pane === this.active && this.active.activeTab()?.ptyId === id) this.paintStatusBar();
       },
-      onNewTab: (pane) => {
+      onNewTab: (pane, anchor) => {
         this.setActivePane(pane);
-        void this.createSession(this.homeDir);
+        const r = anchor.getBoundingClientRect();
+        openCommandMenu(r.left, r.bottom, this.opts.settings.commands(), (cmd) =>
+          void this.createSession(this.homeDir, { command: cmd.command }),
+        );
       },
       onTabClicked: (id) => {
         const pane = this.ptyIndex.get(id);
@@ -126,7 +137,7 @@ export class PaneManager {
 
   async createSession(
     folder: string,
-    opts: { persistentId?: string; claudeId?: string | null } = {},
+    opts: { persistentId?: string; claudeId?: string | null; command?: string } = {},
   ): Promise<void> {
     const pane = this.active;
     if (!pane) return;
@@ -134,7 +145,9 @@ export class PaneManager {
     const term = new TerminalTab(pane.stackEl);
     const dims = term.fit();
 
-    const startupCommand = opts.claudeId ? `claude --resume ${opts.claudeId}` : 'claude';
+    const startupCommand = opts.claudeId
+      ? `claude --resume ${opts.claudeId}`
+      : (opts.command ?? 'claude');
     const ptyId = await window.api.pty.spawn({
       folder,
       cols: dims.cols,
@@ -145,6 +158,7 @@ export class PaneManager {
     term.onInput((data) => window.api.pty.write(ptyId, data));
 
     const tab: Tab = {
+      kind: 'terminal',
       persistentId: opts.persistentId ?? ptyId,
       ptyId,
       folder,
@@ -177,10 +191,44 @@ export class PaneManager {
     }
   }
 
+  /** Open the Settings tab in the active (first available) pane, or focus it if
+   *  it already exists somewhere — there is only ever one. */
+  openSettings(): void {
+    for (const pane of this.panes) {
+      if (pane.has(SETTINGS_ID)) {
+        pane.activateTab(SETTINGS_ID);
+        this.setActivePane(pane);
+        return;
+      }
+    }
+    const pane = this.active ?? this.panes[0] ?? null;
+    if (!pane) return;
+    this.setActivePane(pane);
+
+    const view = new SettingsView(pane.stackEl, this.opts.settings);
+    const tab: Tab = {
+      kind: 'settings',
+      persistentId: SETTINGS_ID,
+      ptyId: SETTINGS_ID,
+      folder: '',
+      status: 'idle',
+      busyStart: null,
+      totalCost: 0,
+      totalTokens: 0,
+      term: view,
+      btn: document.createElement('button'),
+      dot: document.createElement('span'),
+      elapsedEl: document.createElement('span'),
+    };
+    this.ptyIndex.set(SETTINGS_ID, pane);
+    pane.addTab(tab);
+  }
+
   private closeTab(ptyId: string): void {
     const pane = this.ptyIndex.get(ptyId);
     if (!pane) return;
-    window.api.pty.kill(ptyId);
+    // The Settings tab has no backing PTY — don't try to kill one.
+    if (pane.get(ptyId)?.kind === 'terminal') window.api.pty.kill(ptyId);
     this.ptyIndex.delete(ptyId);
     pane.removeTab(ptyId);
     this.paintStatusBar();
@@ -189,7 +237,7 @@ export class PaneManager {
   // --- PTY event routing ------------------------------------------------
 
   routeData(id: string, data: string): void {
-    this.ptyIndex.get(id)?.get(id)?.term.feed(data);
+    this.ptyIndex.get(id)?.get(id)?.term.feed?.(data);
   }
 
   routeStatus(id: string, status: Tab['status']): void {
@@ -250,7 +298,10 @@ export class PaneManager {
   }
 
   paintStatusBar(): void {
-    const tab = this.active?.activeTab() ?? null;
+    // The status bar describes a terminal session; a non-terminal view (Settings)
+    // shows the neutral placeholders.
+    const active = this.active?.activeTab() ?? null;
+    const tab = active && active.kind === 'terminal' ? active : null;
     this.setText(this.statusValue('status-folder'), tab ? tab.folder : '—');
     this.setText(this.statusValue('status-cost'), tab ? tab.totalCost.toFixed(4) : '0.0000');
     this.setText(this.statusValue('status-model'), tab ? 'claude' : '—');

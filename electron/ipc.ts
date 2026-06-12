@@ -42,6 +42,38 @@ export interface UsageEvent {
   tokensOut: number;
 }
 
+/**
+ * One user-defined launch command, shown in the "+" new-tab menu and the folder
+ * tree's right-click menu. `command` is typed into the freshly spawned shell; an
+ * empty string means "just a plain shell" (no startup command).
+ */
+export interface CommandPreset {
+  name: string;
+  command: string;
+}
+
+/** User-editable application settings, persisted as JSON in the user data dir. */
+export interface AppSettings {
+  commands: CommandPreset[];
+}
+
+/**
+ * Seed commands shipped on first run (no settings file yet). Covers the common
+ * agent CLIs plus a couple of build commands as examples the user can edit.
+ */
+export const DEFAULT_COMMANDS: CommandPreset[] = [
+  { name: 'Claude', command: 'claude' },
+  { name: 'Claude (continue)', command: 'claude --continue' },
+  { name: 'Claude (skip permissions)', command: 'claude --dangerously-skip-permissions' },
+  { name: 'Codex', command: 'codex' },
+  { name: 'Shell', command: '' },
+  { name: 'npm build', command: 'npm run build' },
+  { name: 'dotnet build', command: 'dotnet build' },
+  { name: 'dotnet run', command: 'dotnet run' },
+];
+
+export const DEFAULT_SETTINGS: AppSettings = { commands: DEFAULT_COMMANDS };
+
 export const Channels = {
   ptySpawn: 'pty:spawn',
   ptyWrite: 'pty:write',
@@ -59,6 +91,8 @@ export const Channels = {
   sessionGet: 'session:get',
   sessionDelete: 'session:delete',
   usageAdd: 'usage:add',
+  settingsGet: 'settings:get',
+  settingsSave: 'settings:save',
   winMinimize: 'win:minimize',
   winMaximizeToggle: 'win:maximizeToggle',
   winClose: 'win:close',
