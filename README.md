@@ -31,9 +31,11 @@ long-running agent terminals — and gets out of the way.
   at a drive/volume you pick; right-click any directory to launch an agent there or
   open it in your OS file manager. Switching tabs highlights the active session's
   folder and its parents in the tree, so you always see where you are.
-- **Persistence + cost tracking.** Sessions survive app restarts, and token usage is
-  accumulated into a running USD cost per session, shown in the status bar and the
-  session-history pane.
+- **Context-window gauge.** Each tab shows how full its session's context window is —
+  a thin fill bar along the bottom edge (green → amber ≥80% → red ≥95%) plus a `% ctx`
+  readout in the status bar — so you know when to `/compact` or start a fresh session.
+- **Persistence.** Sessions (working folder, agent session id, title) survive app
+  restarts and reappear in the session-history pane.
 - **Searchable session history.** The right pane lists every session by the title the
   agent CLI generates for its task (falling back to the folder name) plus the working
   path; a search box filters by title, name, or path, and one click restores a session.
@@ -54,7 +56,7 @@ long-running agent terminals — and gets out of the way.
 │  ├ proj-b   │ │   xterm.js canvas        │ │ ...             │
 │  └ proj-c   │ │                          │ │                 │
 │             │ └──────────────────────────┘ │                 │
-│             │  📁 ~/dev/proj-a  $0.042     │                 │
+│             │  📁 ~/dev/proj-a   63% ctx   │                 │
 └─────────────┴──────────────────────────────┴─────────────────┘
 ```
 
@@ -119,8 +121,9 @@ git push --follow-tags
 A single Electron app. The main process is the sole broker — it owns the UI window,
 node-pty PTY management, and session persistence; the renderer reaches privileged
 work only through the `window.api` contextBridge, never node-pty or the filesystem
-directly. Sessions, usage, and cost totals are persisted in-process as a small JSON
-file in the per-user app data dir (no database, no second runtime).
+directly. Sessions are persisted in-process as a small JSON file in the per-user app
+data dir (no database, no second runtime); context-window occupancy is read live from
+each session's Claude Code transcript.
 
 Built with Electron, TypeScript (strict), xterm.js, node-pty, and Tailwind CSS v4.
 See [`CLAUDE.md`](CLAUDE.md) for the full design and file map.
