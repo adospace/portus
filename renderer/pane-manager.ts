@@ -137,7 +137,12 @@ export class PaneManager {
 
   async createSession(
     folder: string,
-    opts: { persistentId?: string; claudeId?: string | null; command?: string } = {},
+    opts: {
+      persistentId?: string;
+      claudeId?: string | null;
+      command?: string;
+      title?: string | null;
+    } = {},
   ): Promise<void> {
     const pane = this.active;
     if (!pane) return;
@@ -162,6 +167,7 @@ export class PaneManager {
       persistentId: opts.persistentId ?? ptyId,
       ptyId,
       folder,
+      title: null,
       status: 'idle',
       busyStart: null,
       totalCost: 0,
@@ -174,12 +180,24 @@ export class PaneManager {
     this.ptyIndex.set(ptyId, pane);
     pane.addTab(tab);
 
+    // The agent CLI publishes a short task summary via the terminal title (OSC);
+    // adopt it as the session's display title and persist it so it survives in the
+    // history pane after the terminal is gone.
+    term.onTitle((title) => {
+      const t = title.trim();
+      if (!t || tab.title === t) return;
+      tab.title = t;
+      pane.setTitle(ptyId, t);
+      void this.persistSession(tab, opts.claudeId ?? null);
+    });
+
     const now = new Date().toISOString();
     try {
       await window.api.sessions.save({
         id: tab.persistentId,
         folder,
         claudeId: opts.claudeId ?? null,
+        title: opts.title ?? null,
         createdAt: now,
         lastActive: now,
         totalTokens: 0,
@@ -188,6 +206,27 @@ export class PaneManager {
       await this.opts.onSessionsChanged();
     } catch {
       /* sidecar offline — session still runs, just isn't persisted */
+    }
+  }
+
+  /** Re-save a session's current snapshot (folder/title/totals). Used when the
+   *  title changes mid-session. Token/cost totals are owned by the sidecar, so we
+   *  pass 0 to avoid clobbering them (it only overwrites when totals are > 0). */
+  private async persistSession(tab: Tab, claudeId: string | null): Promise<void> {
+    try {
+      await window.api.sessions.save({
+        id: tab.persistentId,
+        folder: tab.folder,
+        claudeId,
+        title: tab.title,
+        createdAt: new Date().toISOString(),
+        lastActive: new Date().toISOString(),
+        totalTokens: 0,
+        totalCost: 0,
+      });
+      await this.opts.onSessionsChanged();
+    } catch {
+      /* sidecar offline */
     }
   }
 
@@ -211,6 +250,7 @@ export class PaneManager {
       persistentId: SETTINGS_ID,
       ptyId: SETTINGS_ID,
       folder: '',
+      title: null,
       status: 'idle',
       busyStart: null,
       totalCost: 0,

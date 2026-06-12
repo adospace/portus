@@ -55,6 +55,15 @@ export class TerminalTab {
     this.term.onData(cb);
   }
 
+  /**
+   * Fires when the program sets the terminal title via an OSC sequence
+   * (`\x1b]0;…\x07` / `\x1b]2;…`). Claude Code uses this to publish a short
+   * summary of the current task; we surface it as the session's display title.
+   */
+  onTitle(cb: (title: string) => void): void {
+    this.term.onTitleChange(cb);
+  }
+
   feed(data: string): void {
     this.term.write(data);
   }

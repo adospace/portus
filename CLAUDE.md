@@ -221,7 +221,7 @@ Channel names + payload types live in `electron/ipc.ts`; the sidecar mirrors the
 in `Program.cs`'s `Dispatch`.
 ```json
 // request → response
-{ "id": 1, "cmd": "session.save",   "data": { "id":"…","folder":"…","claudeId":null,"createdAt":"…","lastActive":"…","totalTokens":0,"totalCost":0 } }
+{ "id": 1, "cmd": "session.save",   "data": { "id":"…","folder":"…","claudeId":null,"title":null,"createdAt":"…","lastActive":"…","totalTokens":0,"totalCost":0 } }
 { "id": 2, "cmd": "session.list",   "data": {} }
 { "id": 3, "cmd": "session.get",    "data": { "id": "…" } }
 { "id": 4, "cmd": "session.delete", "data": { "id": "…" } }

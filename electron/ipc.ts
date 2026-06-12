@@ -8,6 +8,10 @@ export interface PersistedSession {
   id: string;
   folder: string;
   claudeId: string | null;
+  /** Short summary title emitted by the agent CLI via the terminal title (OSC),
+   *  e.g. Claude Code's task summary. Null until one is seen; falls back to the
+   *  folder name in the UI. */
+  title: string | null;
   createdAt: string;
   lastActive: string;
   totalTokens: number;

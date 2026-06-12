@@ -8,6 +8,9 @@ public sealed class Session
     public string Id { get; set; } = "";
     public string Folder { get; set; } = "";
     public string? ClaudeId { get; set; }
+    /// <summary>Short title summarizing the session (from the agent CLI's terminal
+    /// title). Null until one is captured; the UI falls back to the folder name.</summary>
+    public string? Title { get; set; }
     public string CreatedAt { get; set; } = "";
     public string LastActive { get; set; } = "";
     public long TotalTokens { get; set; }
@@ -41,6 +44,17 @@ public sealed class SessionStore : IDisposable
             .Options;
         _db = new SessionDbContext(options);
         _db.Database.EnsureCreated();
+        // EnsureCreated() never alters an existing schema, so a DB created before
+        // the Title column existed won't have it. Add it idempotently rather than
+        // pulling in EF migrations for a single nullable column.
+        try
+        {
+            _db.Database.ExecuteSqlRaw("ALTER TABLE Sessions ADD COLUMN Title TEXT");
+        }
+        catch
+        {
+            // Column already exists (or table just created with it) — nothing to do.
+        }
     }
 
     public Session Save(Session incoming)

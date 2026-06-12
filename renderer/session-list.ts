@@ -1,5 +1,6 @@
 // Right pane: the list of sessions (live and historical) sourced from the
-// sidecar. Clicking a row asks the app to restore that session.
+// sidecar. Clicking a row asks the app to restore that session. A search box
+// filters the list by session title, folder name, or full path.
 import type { PersistedSession } from '../electron/ipc';
 
 function baseName(p: string): string {
@@ -13,50 +14,82 @@ function shortTime(iso: string): string {
   return d.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
 
+/** The text shown as a row's primary label: the agent title, else the folder name. */
+function displayName(s: PersistedSession): string {
+  return s.title?.trim() || baseName(s.folder);
+}
+
 export class SessionList {
+  private sessions: PersistedSession[] = [];
+  private query = '';
+
   constructor(
     private readonly container: HTMLElement,
     private readonly onRestore: (session: PersistedSession) => void,
-  ) {}
-
-  async refresh(): Promise<void> {
-    let sessions: PersistedSession[] = [];
-    try {
-      sessions = await window.api.sessions.list();
-    } catch {
-      // Sidecar offline; show nothing rather than erroring.
-    }
-    this.render(sessions);
+    search?: HTMLInputElement,
+  ) {
+    search?.addEventListener('input', () => {
+      this.query = search.value.trim().toLowerCase();
+      this.render();
+    });
   }
 
-  private render(sessions: PersistedSession[]): void {
+  async refresh(): Promise<void> {
+    try {
+      this.sessions = await window.api.sessions.list();
+    } catch {
+      // Sidecar offline; show nothing rather than erroring.
+      this.sessions = [];
+    }
+    this.render();
+  }
+
+  private matches(s: PersistedSession): boolean {
+    if (!this.query) return true;
+    return (
+      displayName(s).toLowerCase().includes(this.query) ||
+      s.folder.toLowerCase().includes(this.query) ||
+      (s.title?.toLowerCase().includes(this.query) ?? false)
+    );
+  }
+
+  private render(): void {
     this.container.replaceChildren();
-    if (sessions.length === 0) {
+    const visible = this.sessions
+      .filter((s) => this.matches(s))
+      .sort((a, b) => b.lastActive.localeCompare(a.lastActive));
+
+    if (visible.length === 0) {
       const empty = document.createElement('div');
       empty.className = 'px-3 py-4 text-xs text-muted';
-      empty.textContent = 'No sessions yet.';
+      empty.textContent = this.query ? 'No matching sessions.' : 'No sessions yet.';
       this.container.appendChild(empty);
       return;
     }
 
-    for (const s of [...sessions].sort((a, b) => b.lastActive.localeCompare(a.lastActive))) {
+    for (const s of visible) {
       const row = document.createElement('button');
       row.className =
-        'flex w-full flex-col gap-0.5 px-3 py-2 text-left hover:bg-edge/60 border-b border-edge/40';
+        'flex w-full flex-col gap-0.5 px-3 py-2 text-left cursor-pointer hover:bg-edge/60 border-b border-edge/40';
       row.addEventListener('click', () => this.onRestore(s));
 
       const top = document.createElement('div');
       top.className = 'flex items-center gap-2';
-      top.innerHTML =
-        '<span class="iconify text-muted" data-icon="lucide:folder"></span>' +
-        `<span class="truncate font-medium">${baseName(s.folder)}</span>` +
-        `<span class="ml-auto text-xs text-muted">${shortTime(s.lastActive)}</span>`;
+      const icon = document.createElement('span');
+      icon.className = 'iconify text-muted shrink-0';
+      icon.dataset.icon = 'lucide:folder';
+      const name = document.createElement('span');
+      name.className = 'truncate font-medium';
+      name.textContent = displayName(s);
+      const time = document.createElement('span');
+      time.className = 'ml-auto shrink-0 text-xs text-muted';
+      time.textContent = shortTime(s.lastActive);
+      top.append(icon, name, time);
 
       const bottom = document.createElement('div');
-      bottom.className = 'flex items-center gap-3 text-xs text-muted';
-      bottom.innerHTML =
-        `<span>$${s.totalCost.toFixed(4)}</span>` +
-        `<span>${s.totalTokens.toLocaleString()} tok</span>`;
+      bottom.className = 'truncate text-xs text-muted';
+      bottom.textContent = s.folder;
+      bottom.title = s.folder;
 
       row.append(top, bottom);
       this.container.appendChild(row);

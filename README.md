@@ -39,6 +39,9 @@ long-running agent terminals — and gets out of the way.
 - **Persistence + cost tracking.** Sessions survive app restarts, and token usage is
   accumulated into a running USD cost per session, shown in the status bar and the
   session-history pane.
+- **Searchable session history.** The right pane lists every session by the title the
+  agent CLI generates for its task (falling back to the folder name) plus the working
+  path; a search box filters by title, name, or path, and one click restores a session.
 - **Flexible layouts.** Split the center into 1, 4 (2×2), or 6 (3×2) panes, each its
   own tab group, and drag the gutters to resize.
 

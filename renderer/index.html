@@ -114,6 +114,11 @@
           <span class="iconify text-muted" data-icon="lucide:history"></span>
           <span class="text-xs font-semibold uppercase tracking-wide text-muted">Sessions</span>
         </header>
+        <div class="flex items-center gap-2 px-2 py-1.5 border-b border-edge shrink-0">
+          <span class="iconify text-muted shrink-0 pl-1" data-icon="lucide:search"></span>
+          <input id="session-search" type="text" placeholder="Search sessions…"
+            class="min-w-0 flex-1 bg-bg text-fg text-xs border border-edge rounded px-2 py-1 focus:outline-none focus:border-accent placeholder:text-muted" />
+        </div>
         <div id="session-list" class="scroll-area flex-1 overflow-auto py-1 text-sm"></div>
       </aside>
     </div>

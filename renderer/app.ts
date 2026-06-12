@@ -24,7 +24,13 @@ const settingsStore = new SettingsStore();
 
 const sessionList = new SessionList(
   $('#session-list'),
-  (s) => void paneManager.createSession(s.folder, { persistentId: s.id, claudeId: s.claudeId }),
+  (s) =>
+    void paneManager.createSession(s.folder, {
+      persistentId: s.id,
+      claudeId: s.claudeId,
+      title: s.title,
+    }),
+  $<HTMLInputElement>('#session-search'),
 );
 
 const paneManager = new PaneManager({

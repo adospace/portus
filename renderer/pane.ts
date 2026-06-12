@@ -28,6 +28,8 @@ export interface Tab {
   persistentId: string;
   ptyId: string;
   folder: string;
+  /** Agent-supplied title (terminal OSC). Null → label falls back to folder name. */
+  title: string | null;
   status: SessionStatus;
   busyStart: number | null;
   totalCost: number;
@@ -263,10 +265,24 @@ export class Pane {
     setIcon(tab.dot, 'lucide:circle');
 
     const name = document.createElement('span');
-    name.textContent = baseName(tab.folder);
+    name.className = 'tab-name truncate max-w-[20ch]';
+    name.textContent = tab.title || baseName(tab.folder);
+    name.title = tab.title || tab.folder;
 
     tab.elapsedEl.className = 'text-xs text-muted tabular-nums';
 
     btn.replaceChildren(tab.dot, name, tab.elapsedEl, close);
+  }
+
+  /** Update a terminal tab's display title (from the agent's terminal title). */
+  setTitle(ptyId: string, title: string): void {
+    const tab = this.tabs.get(ptyId);
+    if (!tab || tab.kind !== 'terminal') return;
+    tab.title = title;
+    const name = tab.btn.querySelector<HTMLElement>('.tab-name');
+    if (name) {
+      name.textContent = title || baseName(tab.folder);
+      name.title = title || tab.folder;
+    }
   }
 }
