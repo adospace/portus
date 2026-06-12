@@ -4,7 +4,7 @@
 // owns the set of panes and routes PTY events; a Pane only manages its own DOM
 // and tab set, delegating privileged work (spawn/kill/resize, status bar) back
 // to the manager through callbacks.
-import type { SessionStatus } from '../electron/ipc';
+import type { ContextUsage, SessionStatus } from '../electron/ipc';
 
 /**
  * The minimal surface a Pane needs from whatever fills a tab — a real terminal
@@ -34,6 +34,8 @@ export interface Tab {
   busyStart: number | null;
   totalCost: number;
   totalTokens: number;
+  /** Context-window occupancy of the backing session, polled from its transcript. */
+  context: ContextUsage | null;
   term: TabContent;
   btn: HTMLButtonElement;
   dot: HTMLElement;
@@ -60,6 +62,13 @@ export interface PaneCallbacks {
 function baseName(p: string): string {
   const parts = p.split(/[\\/]/).filter(Boolean);
   return parts[parts.length - 1] ?? p;
+}
+
+/** Compact token count for tooltips: 126000 → "126k", 1_200_000 → "1.2M". */
+function fmtTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1).replace(/\.0$/, '')}M`;
+  if (n >= 1000) return `${Math.round(n / 1000)}k`;
+  return String(n);
 }
 
 // Iconify swaps each `.iconify` placeholder for a fresh SVG, so set an element's
@@ -238,8 +247,8 @@ export class Pane {
   private buildTabButton(tab: Tab): void {
     const btn = tab.btn;
     btn.className =
-      'group flex items-center gap-2 px-3 h-7 my-1 rounded text-sm whitespace-nowrap ' +
-      'border border-transparent hover:border-edge';
+      'group relative overflow-hidden flex items-center gap-2 px-3 h-7 my-1 rounded text-sm ' +
+      'whitespace-nowrap border border-transparent hover:border-edge';
 
     const close = document.createElement('span');
     close.className =
@@ -271,7 +280,32 @@ export class Pane {
 
     tab.elapsedEl.className = 'text-xs text-muted tabular-nums';
 
-    btn.replaceChildren(tab.dot, name, tab.elapsedEl, close);
+    // Thin context-fill bar along the bottom edge of the tab (painted by paintContext).
+    const ctx = document.createElement('span');
+    ctx.className = 'tab-ctx absolute left-0 bottom-0 h-[2px] rounded-full';
+    ctx.style.width = '0';
+
+    btn.replaceChildren(tab.dot, name, tab.elapsedEl, close, ctx);
+  }
+
+  /** Paint the per-tab context-fill bar: green → amber (≥80%) → red (≥95%). */
+  paintContext(tab: Tab): void {
+    if (tab.kind !== 'terminal') return;
+    const bar = tab.btn.querySelector<HTMLElement>('.tab-ctx');
+    if (!bar) return;
+    const c = tab.context;
+    if (!c || c.limit <= 0 || c.tokens <= 0) {
+      bar.style.width = '0';
+      tab.btn.title = '';
+      return;
+    }
+    const pct = Math.min(100, (c.tokens / c.limit) * 100);
+    const tone = pct >= 95 ? 'bg-danger' : pct >= 80 ? 'bg-warn' : 'bg-idle';
+    bar.className = `tab-ctx absolute left-0 bottom-0 h-[2px] rounded-full ${tone}`;
+    bar.style.width = `${pct}%`;
+    tab.btn.title =
+      `Context ${Math.round(pct)}% · ${fmtTokens(c.tokens)} / ${fmtTokens(c.limit)}` +
+      (pct >= 80 ? ' · consider /compact or a fresh session' : '');
   }
 
   /** Update a terminal tab's display title (from the agent's terminal title). */

@@ -71,7 +71,7 @@ The three panes are: **folder tree** (left) → **terminal tabs + status bar**
 **Left pane** — drive/volume selector (header) + folder tree (fs.readdir, lazy-loaded) rooted at the selected drive; defaults to the drive holding the user's home folder; right-click → "New session here"
 **Center pane** — tabbed xterm.js terminals, tab shows: busy indicator (● animated / ◌ idle), folder name, elapsed time when busy
 **Right pane** — session list (current + past), click to restore, shows folder + timestamp
-**Bottom bar** — active tab: working folder, session cost, model, elapsed
+**Bottom bar** — active tab: working folder, context-window used, elapsed (right)
 
 ## Core Features (v1)
 
@@ -97,6 +97,21 @@ The three panes are: **folder tree** (left) → **terminal tabs + status bar**
   session `busy`; after `IDLE_AFTER_MS` (700ms) of silence it flips to `idle`. This
   sidesteps the brittle prompt-string parsing in the original design; swap in
   prompt-marker detection (`✦`/`>`) here if it proves more reliable.
+
+### Context-window gauge
+- **What.** A per-tab "heaviness" indicator: how full the session's context window
+  is, so you know when to `/compact` or start fresh. A thin fill bar along the bottom
+  of each terminal tab (green → amber ≥80% → red ≥95%) plus a `% ctx` segment in the
+  status bar for the active tab; the tab's tooltip shows `tokens / limit`.
+- **Source.** The main process reads the session's Claude Code transcript
+  (`~/.claude/projects/<encoded-cwd>/<newest>.jsonl`, mapped by folder via
+  `context.get`), takes the latest assistant entry's `usage`, and sums
+  `input + cache_creation + cache_read` tokens ≈ current context occupancy. Only a
+  tail of the file is read. Limit defaults to 200k, bumped to 1M when occupancy
+  exceeds 200k (the 1M-context variants aren't distinguishable by model id). The
+  renderer polls every 4s (`PaneManager.refreshContext`). No transcript → no gauge.
+- **Caveat.** Mapping is by folder + newest transcript, so two live sessions in the
+  same folder share a reading until per-session Claude ids are captured.
 
 ### Settings
 - **Where.** Opened from the gear button (titlebar, top-right) or **File ▸ Settings**;
@@ -231,7 +246,8 @@ in `Program.cs`'s `Dispatch`.
 Cost rates live in `UsageTracker` (USD per 1M tokens). The renderer↔main hop is a
 separate IPC layer (Electron `ipcMain`/`contextBridge`); main brokers everything,
 the renderer never touches node-pty or the socket directly. The renderer↔main
-channels (incl. `fs.home`, `fs.listDir`, `fs.drives` → `Drive[]`) and their payload
+channels (incl. `fs.home`, `fs.listDir`, `fs.drives` → `Drive[]`, and `context.get`
+→ `ContextUsage | null`) and their payload
 types live in `electron/ipc.ts` and are exposed via `window.api` in `preload.ts` —
 add new channels in all three layers (ipc/main/preload), the `global.d.ts` type
 follows automatically.

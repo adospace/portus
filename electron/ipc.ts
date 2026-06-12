@@ -47,6 +47,18 @@ export interface UsageEvent {
 }
 
 /**
+ * How full a live session's context window is, read from its Claude Code
+ * transcript. `tokens` is the prompt size of the most recent turn (input +
+ * cache-creation + cache-read), which approximates current context occupancy;
+ * `limit` is the model's context window. Drives the per-tab "heaviness" gauge.
+ */
+export interface ContextUsage {
+  tokens: number;
+  limit: number;
+  model: string;
+}
+
+/**
  * One user-defined launch command, shown in the "+" new-tab menu and the folder
  * tree's right-click menu. `command` is typed into the freshly spawned shell; an
  * empty string means "just a plain shell" (no startup command).
@@ -90,6 +102,7 @@ export const Channels = {
   fsListDir: 'fs:listDir',
   fsHome: 'fs:home',
   fsDrives: 'fs:drives',
+  contextGet: 'context:get',
   sessionList: 'session:list',
   sessionSave: 'session:save',
   sessionGet: 'session:get',

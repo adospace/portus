@@ -2,7 +2,7 @@
 // SidecarClient, and wires the renderer's IPC calls to both. The renderer never
 // touches node-pty or the sidecar socket directly — everything is brokered here.
 import { app, BrowserWindow, ipcMain, type IpcMainInvokeEvent } from 'electron';
-import { access, readdir, readFile, writeFile } from 'node:fs/promises';
+import { access, open, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { PtyManager } from './pty-manager.js';
@@ -11,6 +11,7 @@ import {
   Channels,
   DEFAULT_SETTINGS,
   type AppSettings,
+  type ContextUsage,
   type DirEntry,
   type Drive,
   type PersistedSession,
@@ -72,6 +73,102 @@ async function listDrives(): Promise<Drive[]> {
   return drives;
 }
 
+// --- Context-window gauge -------------------------------------------------
+// Claude Code writes a per-session transcript at
+// ~/.claude/projects/<encoded-cwd>/<session-id>.jsonl. The latest assistant
+// entry's usage tells us how full the context window is, which drives the
+// per-tab "heaviness" gauge (when to /compact or start fresh).
+
+const CONTEXT_TAIL_BYTES = 256 * 1024;
+
+/** Loose shape of the transcript fields we read. */
+interface TranscriptUsage {
+  input_tokens?: number;
+  cache_creation_input_tokens?: number;
+  cache_read_input_tokens?: number;
+}
+interface TranscriptEntry {
+  message?: { usage?: TranscriptUsage; model?: string };
+  usage?: TranscriptUsage;
+  model?: string;
+}
+
+/** Map a working folder to Claude Code's project-dir name (non-alphanumerics → '-'). */
+function encodeProjectDir(folder: string): string {
+  return folder.replace(/[/\\]+$/, '').replace(/[^a-zA-Z0-9]/g, '-');
+}
+
+/** Standard Claude context is 200k; 1M-context variants can't be told apart by
+ *  model id, so bump the denominator once occupancy clearly exceeds 200k. */
+function contextLimitFor(tokens: number): number {
+  return tokens > 200_000 ? 1_000_000 : 200_000;
+}
+
+/** Newest .jsonl transcript for a folder = the live session for that directory. */
+async function newestTranscript(folder: string): Promise<string | null> {
+  const dir = join(homedir(), '.claude', 'projects', encodeProjectDir(folder));
+  let entries;
+  try {
+    entries = await readdir(dir, { withFileTypes: true });
+  } catch {
+    return null; // no transcripts for this folder yet
+  }
+  let newest: { path: string; mtime: number } | null = null;
+  for (const e of entries) {
+    if (!e.isFile() || !e.name.endsWith('.jsonl')) continue;
+    const p = join(dir, e.name);
+    try {
+      const s = await stat(p);
+      if (!newest || s.mtimeMs > newest.mtime) newest = { path: p, mtime: s.mtimeMs };
+    } catch {
+      /* skip unreadable */
+    }
+  }
+  return newest?.path ?? null;
+}
+
+async function readContextUsage(folder: string): Promise<ContextUsage | null> {
+  const file = await newestTranscript(folder);
+  if (!file) return null;
+  let fh: Awaited<ReturnType<typeof open>> | undefined;
+  try {
+    fh = await open(file, 'r');
+    const { size } = await fh.stat();
+    // Read only the tail — the latest assistant entry is near the end, and the
+    // file can be many MB. Drop the first (likely partial) line.
+    const len = Math.min(size, CONTEXT_TAIL_BYTES);
+    const buf = Buffer.alloc(len);
+    await fh.read(buf, 0, len, size - len);
+    const lines = buf.toString('utf8').split('\n');
+    if (size > len) lines.shift();
+
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const line = lines[i]!.trim();
+      if (!line) continue;
+      let entry: TranscriptEntry;
+      try {
+        entry = JSON.parse(line) as TranscriptEntry;
+      } catch {
+        continue;
+      }
+      const usage = entry.message?.usage ?? entry.usage;
+      if (!usage) continue;
+      const tokens =
+        (usage.input_tokens ?? 0) +
+        (usage.cache_creation_input_tokens ?? 0) +
+        (usage.cache_read_input_tokens ?? 0);
+      if (tokens <= 0) continue;
+      const model = entry.message?.model ?? entry.model ?? '';
+      return { tokens, limit: contextLimitFor(tokens), model };
+    }
+    return null;
+  } catch {
+    return null;
+  } finally {
+    await fh?.close();
+  }
+}
+
 function createWindow(): void {
   const isMac = process.platform === 'darwin';
   // Frameless custom chrome. macOS keeps its native traffic lights via the inset
@@ -128,6 +225,10 @@ function registerIpc(): void {
         return a.name.localeCompare(b.name);
       });
   });
+
+  ipcMain.handle(Channels.contextGet, (_e, folder: string): Promise<ContextUsage | null> =>
+    readContextUsage(folder),
+  );
 
   ipcMain.handle(Channels.sessionList, () => sidecar.listSessions());
   ipcMain.handle(Channels.sessionSave, (_e, s: PersistedSession) => sidecar.saveSession(s));

@@ -172,6 +172,7 @@ export class PaneManager {
       busyStart: null,
       totalCost: 0,
       totalTokens: 0,
+      context: null,
       term,
       btn: document.createElement('button'),
       dot: document.createElement('span'),
@@ -255,6 +256,7 @@ export class PaneManager {
       busyStart: null,
       totalCost: 0,
       totalTokens: 0,
+      context: null,
       term: view,
       btn: document.createElement('button'),
       dot: document.createElement('span'),
@@ -343,12 +345,43 @@ export class PaneManager {
     const active = this.active?.activeTab() ?? null;
     const tab = active && active.kind === 'terminal' ? active : null;
     this.setText(this.statusValue('status-folder'), tab ? tab.folder : '—');
-    this.setText(this.statusValue('status-cost'), tab ? tab.totalCost.toFixed(4) : '0.0000');
-    this.setText(this.statusValue('status-model'), tab ? 'claude' : '—');
+    this.paintContextStatus(tab);
     this.setText(
       this.statusValue('status-elapsed'),
       tab && tab.busyStart ? fmtElapsed(Date.now() - tab.busyStart) : '—',
     );
+  }
+
+  /** Poll each terminal tab's context-window occupancy from its transcript and
+   *  repaint its gauge. Called on a slow interval (reads are cheap tail reads). */
+  async refreshContext(): Promise<void> {
+    for (const pane of this.panes) {
+      for (const tab of pane.tabList()) {
+        if (tab.kind !== 'terminal') continue;
+        try {
+          tab.context = await window.api.context.get(tab.folder);
+        } catch {
+          tab.context = null;
+        }
+        pane.paintContext(tab);
+      }
+    }
+    this.paintStatusBar();
+  }
+
+  /** Status-bar context segment for the active tab: "63%", tinted at the thresholds. */
+  private paintContextStatus(tab: Tab | null): void {
+    const el = this.statusValue('status-context');
+    const c = tab?.context ?? null;
+    if (!c || c.limit <= 0 || c.tokens <= 0) {
+      this.setText(el, '—');
+      el.style.color = '';
+      return;
+    }
+    const pct = Math.round(Math.min(100, (c.tokens / c.limit) * 100));
+    this.setText(el, `${pct}%`);
+    el.style.color =
+      pct >= 95 ? 'var(--color-danger)' : pct >= 80 ? 'var(--color-warn)' : '';
   }
 
   /** Tick elapsed timers across all panes (called on an interval). */

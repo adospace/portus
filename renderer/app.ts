@@ -94,6 +94,9 @@ function wireEvents(): void {
 // Tick the elapsed timers for busy tabs.
 setInterval(() => paneManager.tickElapsed(), 250);
 
+// Poll each session's context-window fill (cheap transcript tail reads).
+setInterval(() => void paneManager.refreshContext(), 4000);
+
 async function init(): Promise<void> {
   wireEvents();
   installOuterSplitters();

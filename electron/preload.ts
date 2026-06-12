@@ -5,6 +5,7 @@ import { contextBridge, ipcRenderer } from 'electron';
 import {
   Channels,
   type AppSettings,
+  type ContextUsage,
   type DirEntry,
   type Drive,
   type PersistedSession,
@@ -40,6 +41,10 @@ const api = {
     home: (): Promise<string> => ipcRenderer.invoke(Channels.fsHome),
     listDir: (path: string): Promise<DirEntry[]> => ipcRenderer.invoke(Channels.fsListDir, path),
     drives: (): Promise<Drive[]> => ipcRenderer.invoke(Channels.fsDrives),
+  },
+  context: {
+    get: (folder: string): Promise<ContextUsage | null> =>
+      ipcRenderer.invoke(Channels.contextGet, folder),
   },
   sessions: {
     list: (): Promise<PersistedSession[]> => ipcRenderer.invoke(Channels.sessionList),
