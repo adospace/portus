@@ -42,6 +42,30 @@ export function openCommandMenu(
     'fixed z-50 min-w-56 max-w-80 max-h-80 overflow-auto scroll-area rounded-md border ' +
     'border-edge bg-panel py-1 shadow-lg text-sm';
 
+  if (extra.length > 0) {
+    for (const action of extra) {
+      const item = document.createElement('button');
+      item.className =
+        'flex w-full items-center gap-2 px-3 py-1.5 text-left text-fg hover:bg-edge/60';
+      const icon = document.createElement('span');
+      icon.className = 'shrink-0 flex items-center text-muted';
+      icon.innerHTML = `<iconify-icon icon="${action.icon}"></iconify-icon>`;
+      const label = document.createElement('span');
+      label.textContent = action.label;
+      item.append(icon, label);
+      item.addEventListener('click', () => {
+        closeCommandMenu();
+        action.onSelect();
+      });
+      menu.appendChild(item);
+    }
+    if (commands.length > 0) {
+      const hr = document.createElement('div');
+      hr.className = 'my-1 border-t border-edge';
+      menu.appendChild(hr);
+    }
+  }
+
   if (commands.length === 0) {
     const empty = document.createElement('div');
     empty.className = 'px-3 py-2 text-xs text-muted';
@@ -68,30 +92,6 @@ export function openCommandMenu(
       onPick(cmd);
     });
     menu.appendChild(item);
-  }
-
-  if (extra.length > 0) {
-    if (commands.length > 0) {
-      const hr = document.createElement('div');
-      hr.className = 'my-1 border-t border-edge';
-      menu.appendChild(hr);
-    }
-    for (const action of extra) {
-      const item = document.createElement('button');
-      item.className =
-        'flex w-full items-center gap-2 px-3 py-1.5 text-left text-fg hover:bg-edge/60';
-      const icon = document.createElement('span');
-      icon.className = 'shrink-0 flex items-center text-muted';
-      icon.innerHTML = `<iconify-icon icon="${action.icon}"></iconify-icon>`;
-      const label = document.createElement('span');
-      label.textContent = action.label;
-      item.append(icon, label);
-      item.addEventListener('click', () => {
-        closeCommandMenu();
-        action.onSelect();
-      });
-      menu.appendChild(item);
-    }
   }
 
   document.body.appendChild(menu);

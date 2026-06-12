@@ -8,6 +8,7 @@ import {
   type ContextUsage,
   type DirEntry,
   type Drive,
+  type GitInfo,
   type PersistedSession,
   type SessionStatus,
   type SpawnRequest,
@@ -47,6 +48,12 @@ const api = {
   shell: {
     /** Open a path in the OS file manager (Explorer / Finder). */
     openPath: (path: string): Promise<string> => ipcRenderer.invoke(Channels.shellOpenPath, path),
+  },
+  git: {
+    /** Git metadata for `folder` — current branch (short SHA if detached) + repo
+     *  name — or null if it isn't a repo. Read from `.git`, no `git` process. */
+    info: (folder: string): Promise<GitInfo | null> =>
+      ipcRenderer.invoke(Channels.gitInfo, folder),
   },
   clipboard: {
     // Electron's clipboard module works in the renderer without the permission

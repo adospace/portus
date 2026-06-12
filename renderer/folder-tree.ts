@@ -94,6 +94,22 @@ export class FolderTree {
     label.textContent = depth === 0 ? entry.path : entry.name;
 
     row.append(chevron, icon, label);
+
+    // Mark git work trees with a small symbol after the name; the repo name is
+    // shown on hover. Best-effort + async — non-repos get nothing.
+    if (entry.isDirectory) {
+      const repo = document.createElement('span');
+      repo.className = 'git-repo shrink-0 ml-1 flex items-center text-muted text-[11px]';
+      repo.hidden = true;
+      repo.innerHTML = '<iconify-icon icon="lucide:git-branch"></iconify-icon>';
+      row.append(repo);
+      void window.api.git.info(entry.path).then((info) => {
+        if (!info) return;
+        repo.title = info.name;
+        repo.hidden = false;
+      });
+    }
+
     wrap.appendChild(row);
 
     const children = document.createElement('div');
@@ -108,7 +124,7 @@ export class FolderTree {
       row.addEventListener('contextmenu', (e) => {
         e.preventDefault();
         e.stopPropagation();
-        this.openMenu(e.clientX, e.clientY, entry.path);
+        this.openMenu(e.clientX, e.clientY, entry.path, wrap);
       });
     }
 
@@ -146,11 +162,22 @@ export class FolderTree {
     }
   }
 
-  private openMenu(x: number, y: number, folder: string): void {
+  private openMenu(x: number, y: number, folder: string, wrap: HTMLElement): void {
     openCommandMenu(x, y, this.getCommands(), (cmd) => this.onRunCommand(folder, cmd.command), [
+      { icon: 'lucide:refresh-cw', label: 'Refresh', onSelect: () => void this.refresh(wrap) },
       revealAction(folder),
       copyPathAction(folder),
     ]);
+  }
+
+  /** Re-read a directory's children from disk: clears the loaded child nodes and,
+   *  if the node is currently expanded, reloads them (a collapsed node simply
+   *  re-fetches on its next expand). */
+  private async refresh(wrap: HTMLElement): Promise<void> {
+    const children = wrap.lastElementChild as HTMLElement;
+    const wasOpen = !children.hidden;
+    children.replaceChildren();
+    if (wasOpen) await this.expand(wrap);
   }
 
   // --- active-folder highlighting --------------------------------------

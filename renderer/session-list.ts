@@ -83,16 +83,13 @@ export class SessionList {
 
     const top = document.createElement('div');
     top.className = 'flex items-center gap-2';
-    const icon = document.createElement('iconify-icon');
-    icon.className = 'text-muted shrink-0';
-    icon.setAttribute('icon', 'lucide:folder');
     const name = document.createElement('span');
     name.className = 'truncate font-medium';
     name.textContent = displayName(s);
     const time = document.createElement('span');
     time.className = 'ml-auto shrink-0 text-xs text-muted group-hover:invisible';
     time.textContent = shortTime(s.lastActive);
-    top.append(icon, name, time);
+    top.append(name, time);
 
     const bottom = document.createElement('div');
     bottom.className = 'truncate text-xs text-muted';

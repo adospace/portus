@@ -59,6 +59,17 @@ export interface ContextUsage {
 }
 
 /**
+ * Git metadata for a folder that is a work tree. `branch` is the current branch
+ * (or a short SHA for a detached HEAD); `name` is the repository name (from the
+ * `origin` remote when present, else the work-tree's folder name). A non-repo
+ * folder yields `null` from `git.info`.
+ */
+export interface GitInfo {
+  branch: string;
+  name: string;
+}
+
+/**
  * One user-defined launch command, shown in the "+" new-tab menu and the folder
  * tree's right-click menu. `command` is typed into the freshly spawned shell; an
  * empty string means "just a plain shell" (no startup command).
@@ -147,6 +158,7 @@ export const Channels = {
   fsDrives: 'fs:drives',
   fsPickFolder: 'fs:pickFolder',
   shellOpenPath: 'shell:openPath',
+  gitInfo: 'git:info',
   contextGet: 'context:get',
   sessionList: 'session:list',
   sessionSave: 'session:save',

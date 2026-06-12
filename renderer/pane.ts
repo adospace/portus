@@ -41,6 +41,9 @@ export interface Tab {
   totalTokens: number;
   /** Context-window occupancy of the backing session, polled from its transcript. */
   context: ContextUsage | null;
+  /** Current git branch of the session's folder (null = not a repo / unknown),
+   *  shown in the status bar. Polled alongside context. */
+  branch: string | null;
   term: TabContent;
   btn: HTMLButtonElement;
   dot: HTMLElement;

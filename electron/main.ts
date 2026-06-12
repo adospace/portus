@@ -4,7 +4,7 @@
 import { app, BrowserWindow, dialog, ipcMain, shell, type IpcMainInvokeEvent } from 'electron';
 import { access, open, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { basename, isAbsolute, join } from 'node:path';
 import { PtyManager } from './pty-manager.js';
 import { SessionStore } from './session-store.js';
 import {
@@ -16,6 +16,7 @@ import {
   type DirEntry,
   type Drive,
   type GeneralSettings,
+  type GitInfo,
   type PersistedSession,
   type SpawnRequest,
 } from './ipc.js';
@@ -174,6 +175,61 @@ async function readContextUsage(folder: string, since?: number): Promise<Context
   }
 }
 
+// --- Git info --------------------------------------------------------------
+// The folder tree marks directories that are git work trees (a small symbol +
+// repo-name tooltip), and the status bar shows the active session's branch. We
+// read both straight from the `.git` metadata rather than spawning `git` — a
+// few small file reads, fast enough to call per visible folder.
+
+/** Resolve a folder's real gitdir, following the `.git`-as-a-file pointer used
+ *  by linked worktrees / submodules. Null if `folder` isn't a git work tree. */
+async function resolveGitDir(folder: string): Promise<string | null> {
+  try {
+    const dotGit = join(folder, '.git');
+    const s = await stat(dotGit);
+    if (s.isDirectory()) return dotGit;
+    // `.git` is a file holding "gitdir: <path>" (linked worktree / submodule).
+    const m = /^gitdir:\s*(.+?)\s*$/m.exec(await readFile(dotGit, 'utf8'));
+    if (!m) return null;
+    return isAbsolute(m[1]!) ? m[1]! : join(folder, m[1]!);
+  } catch {
+    return null; // no .git, unreadable, etc.
+  }
+}
+
+/** Repo name from the `origin` remote in `<gitDir>/config` (last URL segment,
+ *  sans `.git`), falling back to the work-tree's folder name. */
+async function repoName(gitDir: string, folder: string): Promise<string> {
+  try {
+    const cfg = await readFile(join(gitDir, 'config'), 'utf8');
+    const m = /\[remote "origin"\][^[]*?\n\s*url\s*=\s*(.+?)\s*$/ms.exec(cfg);
+    if (m) {
+      const url = m[1]!.replace(/\.git$/, '').replace(/[/\\]+$/, '');
+      const seg = url.split(/[/\\:]/).filter(Boolean).pop();
+      if (seg) return seg;
+    }
+  } catch {
+    /* no config / no origin — fall through to the folder name */
+  }
+  return basename(folder.replace(/[/\\]+$/, '')) || folder;
+}
+
+/** Git metadata for `folder` (current branch + repo name), or null if it isn't a
+ *  git work tree. Reads `.git/HEAD` and `.git/config`; no `git` process. */
+async function readGitInfo(folder: string): Promise<GitInfo | null> {
+  const gitDir = await resolveGitDir(folder);
+  if (!gitDir) return null;
+  try {
+    const head = (await readFile(join(gitDir, 'HEAD'), 'utf8')).trim();
+    const ref = /^ref:\s*refs\/heads\/(.+)$/.exec(head);
+    const branch = ref ? ref[1]! : head.slice(0, 7); // detached HEAD → short SHA
+    if (!branch) return null;
+    return { branch, name: await repoName(gitDir, folder) };
+  } catch {
+    return null;
+  }
+}
+
 // --- User settings ---------------------------------------------------------
 // Settings live as a separate JSON file in the per-user app data dir, so they
 // survive restarts independently of the session store.
@@ -274,6 +330,10 @@ function registerIpc(): void {
         return a.name.localeCompare(b.name);
       });
   });
+
+  ipcMain.handle(Channels.gitInfo, (_e, folder: string): Promise<GitInfo | null> =>
+    readGitInfo(folder),
+  );
 
   ipcMain.handle(Channels.contextGet, (_e, folder: string, since?: number): Promise<ContextUsage | null> =>
     readContextUsage(folder, since),

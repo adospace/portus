@@ -57,6 +57,8 @@ export class PaneManager {
   // status transition (which fires on PTY output) competes with keystroke
   // dispatch on the renderer's single main thread and makes typing feel laggy.
   private readonly statusEls = new Map<string, HTMLElement>();
+  // The status-bar git-branch wrapper (whole segment toggles hidden), resolved once.
+  private branchSeg: HTMLElement | null = null;
   // Last folder reported to onActiveFolderChanged; guards against re-notifying on
   // the hot path (status/usage/context repaints all call paintStatusBar).
   private lastNotifiedFolder: string | null = null;
@@ -214,6 +216,7 @@ export class PaneManager {
       totalCost: 0,
       totalTokens: 0,
       context: null,
+      branch: null,
       term,
       btn: document.createElement('button'),
       dot: document.createElement('span'),
@@ -221,6 +224,12 @@ export class PaneManager {
     };
     this.ptyIndex.set(ptyId, pane);
     pane.addTab(tab);
+
+    // Resolve the folder's git branch for the status bar (best-effort, async).
+    void window.api.git.info(folder).then((info) => {
+      tab.branch = info?.branch ?? null;
+      if (this.isActiveTab(ptyId)) this.paintStatusBar();
+    });
 
     // The agent CLI publishes a short task summary via the terminal title (OSC);
     // adopt it as the session's display title and persist it so it survives in the
@@ -300,6 +309,7 @@ export class PaneManager {
       totalCost: 0,
       totalTokens: 0,
       context: null,
+      branch: null,
       term: view,
       btn: document.createElement('button'),
       dot: document.createElement('span'),
@@ -476,6 +486,7 @@ export class PaneManager {
     const tab = active && active.kind === 'terminal' ? active : null;
     this.notifyActiveFolder(tab ? tab.folder : null);
     this.setText(this.statusValue('status-folder'), tab ? tab.folder : '—');
+    this.paintBranchStatus(tab);
     this.paintContextStatus(tab);
     this.setText(
       this.statusValue('status-elapsed'),
@@ -504,10 +515,25 @@ export class PaneManager {
         } catch {
           tab.context = null;
         }
+        // Re-read the branch too, so a checkout in the terminal is reflected.
+        try {
+          tab.branch = (await window.api.git.info(tab.folder))?.branch ?? null;
+        } catch {
+          tab.branch = null;
+        }
         pane.paintContext(tab);
       }
     }
     this.paintStatusBar();
+  }
+
+  /** Status-bar git-branch segment for the active tab; hidden when the folder
+   *  isn't a repo (so it never shows a bare dash). */
+  private paintBranchStatus(tab: Tab | null): void {
+    this.branchSeg ??= $('#status-branch');
+    const branch = tab?.branch ?? null;
+    this.branchSeg.hidden = !branch;
+    if (branch) this.setText(this.statusValue('status-branch'), branch);
   }
 
   /** Status-bar context segment for the active tab: "63%", tinted at the thresholds. */
