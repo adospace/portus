@@ -13,9 +13,29 @@
   --color-idle: #3fb950;
   --color-warn: #d29922;
   --color-danger: #f85149;
+  /* Terminal selection highlight (read by terminal-tab.ts for xterm's theme). */
+  --color-selection: #264f78;
 
   --font-sans: "Segoe UI", system-ui, -apple-system, sans-serif;
   --font-mono: "Cascadia Code", "Cascadia Mono", "JetBrains Mono", "Fira Code", Menlo, Consolas, "Courier New", monospace;
+}
+
+/* Light theme. ThemeManager (renderer/theme.ts) resolves the user's choice
+   (system → matchMedia) and sets data-theme="light"|"dark" on <html>; only the
+   light override is needed since @theme above is the dark default. Overriding the
+   --color-* variables re-themes every Tailwind utility that references them. */
+:root[data-theme="light"] {
+  --color-bg: #ffffff;
+  --color-panel: #f6f8fa;
+  --color-edge: #d0d7de;
+  --color-fg: #1f2328;
+  --color-muted: #656d76;
+  --color-accent: #bc4c2e;
+  --color-busy: #bc4c2e;
+  --color-idle: #1a7f37;
+  --color-warn: #9a6700;
+  --color-danger: #cf222e;
+  --color-selection: #add6ff;
 }
 
 /* Each terminal fills its pane's stack; only the active one is visible. */

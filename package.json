@@ -1,6 +1,6 @@
 {
   "name": "portus",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "portus — agentic terminal: mission control for multiple AI agent CLI sessions",
   "license": "MIT",
   "author": "Adolfo Marinucci",
@@ -15,33 +15,32 @@
   "main": "dist/electron/main.js",
   "scripts": {
     "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
+    "icon": "node scripts/make-icon.mjs",
     "build:bundle": "node scripts/build.mjs",
     "build:css": "tailwindcss -i renderer/styles.css -o dist/renderer/styles.css --minify",
     "build": "npm run build:bundle && npm run build:css",
     "typecheck": "tsc --noEmit",
-    "test:sidecar": "node scripts/test-sidecar.mjs",
-    "sidecar:build": "dotnet publish sidecar/Portus.Sidecar.csproj -c Release -r win-x64 --self-contained -p:PublishSingleFile=true -o dist/sidecar",
-    "sidecar:build:mac": "dotnet publish sidecar/Portus.Sidecar.csproj -c Release -r osx-arm64 --self-contained -p:PublishSingleFile=true -o dist/sidecar",
     "start": "npm run build && node scripts/start.mjs",
     "dev": "npm run build && node scripts/start.mjs",
     "pack": "electron-builder --publish never",
-    "dist:win": "npm run build && npm run sidecar:build && electron-builder --win --publish never",
-    "dist:mac": "npm run build && npm run sidecar:build:mac && electron-builder --mac --publish never"
+    "dist:win": "npm run build && electron-builder --win --publish never",
+    "dist:mac": "npm run build && electron-builder --mac --publish never"
   },
   "dependencies": {
     "node-pty": "^1.0.0"
   },
   "devDependencies": {
     "@iconify-json/lucide": "^1.2.0",
-    "@iconify/iconify": "^3.1.1",
+    "@iconify/types": "^2.0.0",
     "@tailwindcss/cli": "^4.0.0",
     "@xterm/addon-fit": "^0.10.0",
     "@xterm/addon-web-links": "^0.11.0",
     "@xterm/addon-webgl": "^0.18.0",
     "@xterm/xterm": "^5.5.0",
-    "electron": "^33.0.0",
-    "electron-builder": "^25.1.8",
+    "electron": "^38.0.0",
+    "electron-builder": "^26.0.0",
     "esbuild": "^0.24.0",
+    "iconify-icon": "^3.0.0",
     "tailwindcss": "^4.0.0",
     "typescript": "^5.6.0"
   }

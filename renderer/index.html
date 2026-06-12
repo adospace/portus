@@ -4,7 +4,8 @@
     <meta charset="UTF-8" />
     <meta http-equiv="Content-Security-Policy"
       content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:;" />
-    <title>portus</title>
+    <title>PORTUS</title>
+    <link rel="icon" type="image/png" href="./icon.png" />
     <link rel="stylesheet" href="./styles.css" />
     <link rel="stylesheet" href="./app.css" />
   </head>
@@ -16,8 +17,8 @@
       <!-- Left cluster: app icon + File menu -->
       <div id="titlebar-left" class="flex items-center h-full" style="-webkit-app-region: no-drag">
         <div class="flex items-center gap-2 px-3">
-          <span class="iconify text-accent text-base" data-icon="lucide:ship"></span>
-          <span class="text-xs font-semibold tracking-wide">portus</span>
+          <iconify-icon class="text-accent text-base" icon="lucide:ship"></iconify-icon>
+          <span class="text-xs font-semibold tracking-wide">PORTUS</span>
         </div>
         <button id="menu-file"
           class="px-3 h-full text-xs text-muted hover:text-fg hover:bg-edge/60">File</button>
@@ -31,33 +32,37 @@
         <div id="layout-select" class="flex items-center gap-0.5 px-2">
           <button data-mode="single" title="Single view"
             class="layout-btn flex items-center justify-center w-7 h-7 rounded text-muted hover:text-fg hover:bg-edge/60">
-            <span class="iconify" data-icon="lucide:square"></span>
+            <iconify-icon icon="lucide:square"></iconify-icon>
+          </button>
+          <button data-mode="double" title="Double view (2×1)"
+            class="layout-btn flex items-center justify-center w-7 h-7 rounded text-muted hover:text-fg hover:bg-edge/60">
+            <iconify-icon icon="lucide:columns-2"></iconify-icon>
           </button>
           <button data-mode="quad" title="Quad view (2×2)"
             class="layout-btn flex items-center justify-center w-7 h-7 rounded text-muted hover:text-fg hover:bg-edge/60">
-            <span class="iconify" data-icon="lucide:grid-2x2"></span>
+            <iconify-icon icon="lucide:grid-2x2"></iconify-icon>
           </button>
           <button data-mode="six" title="Six view (3×2)"
             class="layout-btn flex items-center justify-center w-7 h-7 rounded text-muted hover:text-fg hover:bg-edge/60">
-            <span class="iconify" data-icon="lucide:layout-grid"></span>
+            <iconify-icon icon="lucide:layout-grid"></iconify-icon>
           </button>
         </div>
         <button id="open-settings" title="Settings"
           class="flex items-center justify-center w-7 h-7 mr-1 rounded text-muted hover:text-fg hover:bg-edge/60">
-          <span class="iconify" data-icon="lucide:settings"></span>
+          <iconify-icon icon="lucide:settings"></iconify-icon>
         </button>
         <div id="win-controls" class="flex items-center h-full">
           <button id="win-min" title="Minimize"
             class="flex items-center justify-center w-11 h-full text-muted hover:text-fg hover:bg-edge/60">
-            <span class="iconify" data-icon="lucide:minus"></span>
+            <iconify-icon icon="lucide:minus"></iconify-icon>
           </button>
           <button id="win-max" title="Maximize"
             class="flex items-center justify-center w-11 h-full text-muted hover:text-fg hover:bg-edge/60">
-            <span class="iconify" data-icon="lucide:square"></span>
+            <iconify-icon icon="lucide:square"></iconify-icon>
           </button>
           <button id="win-close" title="Close"
             class="flex items-center justify-center w-11 h-full text-muted hover:text-fg hover:bg-[#e81123] hover:text-white">
-            <span class="iconify" data-icon="lucide:x"></span>
+            <iconify-icon icon="lucide:x"></iconify-icon>
           </button>
         </div>
       </div>
@@ -70,7 +75,7 @@
       <!-- Left: folder tree -->
       <aside class="flex flex-col border-r border-edge bg-panel min-h-0 min-w-0">
         <header class="flex items-center gap-2 px-3 h-10 border-b border-edge shrink-0">
-          <span class="iconify text-muted shrink-0" data-icon="lucide:hard-drive"></span>
+          <iconify-icon class="text-muted shrink-0" icon="lucide:hard-drive"></iconify-icon>
           <select id="drive-select"
             class="min-w-0 flex-1 bg-bg text-fg text-xs border border-edge rounded px-1.5 py-1 cursor-pointer hover:border-muted focus:outline-none focus:border-accent">
           </select>
@@ -87,15 +92,15 @@
         <footer id="status-bar"
           class="flex items-center gap-4 h-8 px-3 border-t border-edge bg-panel text-xs text-muted shrink-0">
           <span id="status-folder" class="flex items-center gap-1">
-            <span class="iconify" data-icon="lucide:folder"></span>
+            <iconify-icon icon="lucide:folder"></iconify-icon>
             <span>—</span>
           </span>
           <span id="status-context" class="flex items-center gap-1" title="Context window used">
-            <span class="iconify" data-icon="lucide:gauge"></span>
+            <iconify-icon icon="lucide:gauge"></iconify-icon>
             <span>—</span>
           </span>
           <span id="status-elapsed" class="ml-auto flex items-center gap-1">
-            <span class="iconify" data-icon="lucide:clock"></span>
+            <iconify-icon icon="lucide:clock"></iconify-icon>
             <span>—</span>
           </span>
         </footer>
@@ -107,11 +112,11 @@
       <!-- Right: session history -->
       <aside class="flex flex-col border-l border-edge bg-panel min-h-0 min-w-0">
         <header class="flex items-center gap-2 px-3 h-10 border-b border-edge shrink-0">
-          <span class="iconify text-muted" data-icon="lucide:history"></span>
+          <iconify-icon class="text-muted" icon="lucide:history"></iconify-icon>
           <span class="text-xs font-semibold uppercase tracking-wide text-muted">Sessions</span>
         </header>
         <div class="flex items-center gap-2 px-2 py-1.5 border-b border-edge shrink-0">
-          <span class="iconify text-muted shrink-0 pl-1" data-icon="lucide:search"></span>
+          <iconify-icon class="text-muted shrink-0 pl-1" icon="lucide:search"></iconify-icon>
           <input id="session-search" type="text" placeholder="Search sessions…"
             class="min-w-0 flex-1 bg-bg text-fg text-xs border border-edge rounded px-2 py-1 focus:outline-none focus:border-accent placeholder:text-muted" />
         </div>

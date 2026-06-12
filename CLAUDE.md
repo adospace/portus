@@ -33,15 +33,18 @@ The three panes are: **folder tree** (left) → **terminal tabs + status bar**
 
 ## Architecture
 
-### Two-process model
-- **Electron shell** — UI, xterm.js terminal emulation, node-pty PTY management. The
-  main process is the sole broker: the renderer reaches privileged work only through
-  the `window.api` contextBridge (`electron/preload.ts`), never node-pty or the
-  socket directly.
-- **.NET sidecar** — session persistence, usage tracking, and cost aggregation
-  (SQLite via EF Core). Auto-started as a child process by Electron and spoken to
-  over a named pipe (Windows) / Unix domain socket (macOS) with newline-delimited
-  JSON. (Published self-contained single-file, not AOT — see Build & Run.)
+### Single-process model
+A single Electron app — no sidecar, no second runtime. The **main process** is the
+sole broker: UI window, xterm.js terminal emulation, node-pty PTY management, **and**
+session persistence. The renderer reaches privileged work only through the
+`window.api` contextBridge (`electron/preload.ts`), never node-pty or the filesystem
+directly. Sessions, usage, and cost totals are persisted **in-process** as a small
+JSON file (`sessions.json`) in the per-user app data dir — see `electron/session-store.ts`.
+
+> Historical note: persistence used to live in a separate **.NET sidecar** (SQLite +
+> EF Core) spoken to over a named pipe. That was removed — the dataset is a handful
+> of session rows, so a JSON file in the main process does the same job without a
+> second language, runtime, IPC layer, or the packaging footguns it carried.
 
 ### Tech stack
 - Electron (latest stable)
@@ -49,9 +52,9 @@ The three panes are: **folder tree** (left) → **terminal tabs + status bar**
 - xterm.js + xterm-addon-fit + xterm-addon-web-links
 - node-pty (ConPTY on Windows, unix-pty on Mac)
 - Tailwind CSS v4 (CSS-first config, no tailwind.config.js)
-- Iconify with Lucide icon set (`@iconify/iconify` + `lucide` collection)
+- Iconify with Lucide icon set (`iconify-icon` web component + `@iconify-json/lucide` collection)
 - npm (no yarn/pnpm)
-- .NET 10 AOT sidecar (C# 14, named pipe server, EF Core + SQLite)
+- Session persistence: in-process JSON store (`electron/session-store.ts`), no database
 
 ## UI Layout
 
@@ -78,13 +81,15 @@ The three panes are: **folder tree** (left) → **terminal tabs + status bar**
 ### Session lifecycle
 - Spawn `claude` via node-pty from the target folder
 - Detect idle vs busy by parsing PTY output for Claude's prompt string (`✦` or `>`)
-- On app close: serialize all open sessions (folder, claude session ID from `--resume`) to sidecar
+- On app close: serialize all open sessions (folder, claude session ID from `--resume`) to the session store
 - On app start: restore sessions, re-attach via `claude --resume <id>`
 
 ### Session persistence
-- Sidecar owns a SQLite DB: sessions table (id, folder, claude_session_id, created_at, last_active, total_tokens, total_cost)
-- Electron calls sidecar over named pipe for read/write
-- Sidecar auto-starts as child process on Electron startup
+- `SessionStore` (`electron/session-store.ts`) owns `sessions.json` in `app.getPath('userData')`:
+  one record per session (id, folder, claudeId, title, createdAt, lastActive, totalTokens, totalCost)
+- Loaded into an in-memory Map on startup; every mutation rewrites the file atomically
+  (temp-file + rename). Reads (`list`/`get`) serve from memory; search is plain array filtering
+- The renderer reaches it through `window.api.sessions.*` / `usage.add` → main-process IPC handlers
 
 ### Usage tracking
 - Parse PTY output for Claude's end-of-turn usage summary (tokens in/out)
@@ -110,8 +115,14 @@ The three panes are: **folder tree** (left) → **terminal tabs + status bar**
   tail of the file is read. Limit defaults to 200k, bumped to 1M when occupancy
   exceeds 200k (the 1M-context variants aren't distinguishable by model id). The
   renderer polls every 4s (`PaneManager.refreshContext`). No transcript → no gauge.
-- **Caveat.** Mapping is by folder + newest transcript, so two live sessions in the
-  same folder share a reading until per-session Claude ids are captured.
+- **Freshness.** `context.get(folder, since)` ignores transcripts last modified
+  before `since` (the tab's `startedAt`), so a **new** session never inherits a
+  prior run's leftover transcript in the same folder — and a plain shell (which
+  writes no transcript) shows no gauge. A resumed session's gauge stays blank until
+  its first new turn touches the transcript.
+- **Caveat.** Within a session's own lifetime, mapping is still by folder + newest
+  transcript, so two live sessions started in the same folder can share a reading
+  until per-session Claude ids are captured.
 
 ### Settings
 - **Where.** Opened from the gear button (titlebar, top-right) or **File ▸ Settings**;
@@ -142,7 +153,7 @@ The three panes are: **folder tree** (left) → **terminal tabs + status bar**
 ├── electron/
 │   ├── main.ts           # Electron main process: window, IPC broker, lifecycle
 │   ├── pty-manager.ts    # node-pty session management + busy/idle detection
-│   ├── sidecar.ts        # spawns + talks to the .NET sidecar over the pipe
+│   ├── session-store.ts  # in-process JSON session persistence + cost rates (replaces the sidecar)
 │   ├── ipc.ts            # shared channel names + payload types (main/preload/renderer)
 │   └── preload.ts        # contextBridge → window.api
 ├── renderer/
@@ -157,19 +168,19 @@ The three panes are: **folder tree** (left) → **terminal tabs + status bar**
 │   ├── folder-tree.ts    # left pane: drive/volume selector + lazy dir tree (fs.drives)
 │   ├── session-list.ts   # right pane
 │   ├── settings-store.ts # in-memory holder for user settings (loads/saves via window.api.settings)
-│   ├── settings-view.ts  # Settings tab content: left nav + section editors (Commands)
+│   ├── settings-view.ts  # Settings tab content: left nav + section editors (General, Commands)
 │   ├── command-menu.ts   # shared popup listing launch commands (+ button & folder-tree menu)
+│   ├── context-menu.ts   # generic icon+label context menu (tab right-click actions)
+│   ├── file-manager.ts   # shared "open folder in OS file manager" label + action (shell.openPath)
+│   ├── theme.ts          # ThemeManager: system/light/dark resolution + <html> data-theme
 │   ├── global.d.ts       # ambient window.api type + lucide json module decl
-│   └── styles.css        # Tailwind v4 entry (@import "tailwindcss")
+│   └── styles.css        # Tailwind v4 entry (@import "tailwindcss") + light-theme tokens
 ├── scripts/
-│   ├── build.mjs         # esbuild: bundles main/preload/renderer + copies html
-│   ├── start.mjs         # launches Electron with NODE_OPTIONS sanitized
-│   └── test-sidecar.mjs  # headless smoke test of the pipe protocol
-├── sidecar/              # .NET 10 project
-│   ├── Program.cs        # entry + command dispatch
-│   ├── SessionStore.cs   # EF Core + SQLite (Session entity, DbContext, CRUD)
-│   ├── PipeServer.cs     # NDJSON over named pipe (win) / Unix socket (mac)
-│   └── UsageTracker.cs
+│   ├── build.mjs         # esbuild: bundles main/preload/renderer + copies html + icon
+│   ├── make-icon.mjs     # renders build/icon.png from the Lucide ship glyph (no image deps)
+│   └── start.mjs         # launches Electron with NODE_OPTIONS sanitized
+├── build/
+│   └── icon.png          # app icon (1024², generated by make-icon.mjs); electron-builder source
 ├── .github/workflows/
 │   └── release.yml       # CI: on v* tag → build win+mac, publish to GitHub Releases
 ├── electron-builder.yml  # packaging: NSIS (win) + dmg/zip (mac); asar:false, npmRebuild:false
@@ -209,14 +220,17 @@ The three panes are: **folder tree** (left) → **terminal tabs + status bar**
 - TypeScript strict mode throughout — main process, preload, and renderer
 - No React/Vue/Angular/Svelte — vanilla TypeScript + DOM, keep it lean
 - Tailwind v4 — CSS-first, use `@import "tailwindcss"` in styles.css, no config file, custom tokens via `@theme`
-- Icons via Iconify runtime (`@iconify/iconify`) with Lucide collection — e.g. `<span class="iconify" data-icon="lucide:terminal"></span>`
-- **Iconify replaces the placeholder node.** At render time Iconify swaps each
-  `.iconify` `<span>` for a fresh `<svg>` (`replaceChild`), so any click listener or
-  later `dataset.icon =` write on the original span is silently lost. For anything
-  dynamic or clickable, keep a **stable wrapper** element and set its icon via the
-  `setIcon(wrapper, name)` helper (`pane.ts`, `folder-tree.ts`, `titlebar.ts` — writes
-  a new inner placeholder the observer renders); put listeners and transforms on the wrapper.
-- .NET sidecar: C# 14, minimal APIs pattern for the pipe protocol, no over-engineering
+- Icons via the **`iconify-icon` web component** with the Lucide collection — e.g.
+  `<iconify-icon icon="lucide:terminal"></iconify-icon>`. The element renders itself
+  (no `scan()` step) and re-renders when its `icon` attribute changes, including nodes
+  added later. The collection is registered offline in `app.ts`
+  (`addCollection(lucide)` from `iconify-icon`), so there are no network/API calls.
+- **Stable-wrapper `setIcon` is still used for dynamic icons.** Unlike the old
+  `@iconify/iconify` runtime (which swapped the placeholder `<span>` for an `<svg>`),
+  `iconify-icon` elements are stable — but the `setIcon(wrapper, name)` helper
+  (`pane.ts`, `folder-tree.ts`, `titlebar.ts`) is retained so listeners/transforms live
+  on the wrapper (e.g. the rotating folder chevron, the max/restore glyph). It now
+  writes an inner `<iconify-icon>` rather than a placeholder span.
 - xterm.js: always use WebGL renderer addon for performance. `fontFamily` must be a
   **concrete font stack**, not a CSS `var(...)` — xterm renders to canvas/WebGL and
   can't resolve CSS variables; `terminal-tab.ts` reads `--font-mono` via
@@ -228,29 +242,22 @@ The three panes are: **folder tree** (left) → **terminal tabs + status bar**
 - Never hard-code paths — all folder references relative or from user config
 - npm only — no yarn, no pnpm
 
-## IPC Protocol (Electron ↔ Sidecar)
-Newline-delimited JSON over a named pipe (`\\.\pipe\portus`) on Windows / Unix
-domain socket (`/tmp/portus.sock`) on macOS. Each request carries an `id` so the
-client can correlate the response; the sidecar echoes it back in an envelope.
-Channel names + payload types live in `electron/ipc.ts`; the sidecar mirrors them
-in `Program.cs`'s `Dispatch`.
-```json
-// request → response
-{ "id": 1, "cmd": "session.save",   "data": { "id":"…","folder":"…","claudeId":null,"title":null,"createdAt":"…","lastActive":"…","totalTokens":0,"totalCost":0 } }
-{ "id": 2, "cmd": "session.list",   "data": {} }
-{ "id": 3, "cmd": "session.get",    "data": { "id": "…" } }
-{ "id": 4, "cmd": "session.delete", "data": { "id": "…" } }
-{ "id": 5, "cmd": "usage.add",      "data": { "sessionId":"…","tokensIn":1200,"tokensOut":340 } }
-// response envelope:  { "id": 5, "ok": true, "data": <result> }  |  { "id": 5, "ok": false, "error": "…" }
-```
-Cost rates live in `UsageTracker` (USD per 1M tokens). The renderer↔main hop is a
-separate IPC layer (Electron `ipcMain`/`contextBridge`); main brokers everything,
-the renderer never touches node-pty or the socket directly. The renderer↔main
-channels (incl. `fs.home`, `fs.listDir`, `fs.drives` → `Drive[]`, and `context.get`
-→ `ContextUsage | null`) and their payload
-types live in `electron/ipc.ts` and are exposed via `window.api` in `preload.ts` —
-add new channels in all three layers (ipc/main/preload), the `global.d.ts` type
-follows automatically.
+## IPC Protocol (renderer ↔ main)
+There is only one IPC layer now: Electron `ipcMain`/`contextBridge`. The main
+process brokers everything; the renderer never touches node-pty or the filesystem
+directly. Session persistence is an in-process call into `SessionStore`
+(`electron/session-store.ts`) — no pipe, no envelope, no request ids.
+
+The renderer↔main channels (incl. `sessions.list/save/get/delete`, `usage.add`,
+`fs.home`, `fs.listDir`, `fs.drives` → `Drive[]`, and `context.get` →
+`ContextUsage | null`) and their payload types live in `electron/ipc.ts` and are
+exposed via `window.api` in `preload.ts` — add new channels in all three layers
+(ipc/main/preload), the `global.d.ts` type follows automatically.
+
+Cost rates (USD per 1M tokens) live in `session-store.ts` (`INPUT_RATE_PER_MILLION`
+/ `OUTPUT_RATE_PER_MILLION`); `addUsage` applies the delta and recomputes the running
+cost. `save` patches an existing row but only overwrites token/cost totals when the
+incoming values are > 0, so a plain title/folder re-save never clobbers usage.
 
 ## Out of Scope (v1)
 - File editor or file viewer
@@ -261,13 +268,22 @@ follows automatically.
 
 ## Build & Run
 ```bash
-npm install             # node-pty ships N-API prebuilds — NO native rebuild needed (see note)
-npm run sidecar:build   # publish the .NET sidecar exe → dist/sidecar/ (run once, or after C# changes)
-npm start               # build:bundle + build:css, then launch Electron via scripts/start.mjs
+npm install   # node-pty ships N-API prebuilds — NO native rebuild needed (see note)
+npm start     # build:bundle + build:css, then launch Electron via scripts/start.mjs
 ```
 Other scripts: `npm run typecheck` (tsc, strict, no emit), `npm run build`
-(esbuild bundle + Tailwind CSS only), `npm run test:sidecar` (headless pipe-protocol
-smoke test), `npm run sidecar:build:mac` (osx-arm64 publish).
+(esbuild bundle + Tailwind CSS only), `npm run icon` (regenerate `build/icon.png`
+from the Lucide ship glyph — only needed when the glyph or accent color changes).
+No sidecar build step — persistence is in-process TypeScript.
+
+### App icon
+- A single mark — the Lucide **ship** glyph on the accent rounded square — is the
+  whole app's identity: the title-bar icon, the favicon, the BrowserWindow icon, and
+  the packaged installer icon. `scripts/make-icon.mjs` renders `build/icon.png`
+  (1024²) with **no image dependencies** (it flattens the SVG path and stroke-fills it
+  via a distance field, then encodes PNG through `node:zlib`). `build.mjs` copies that
+  into `dist/renderer/icon.png` for the live window icon/favicon; electron-builder
+  reads `build/icon.png` as its packaging source and derives `.ico`/`.icns` from it.
 
 ### Build pipeline
 - **TypeScript** is bundled by **esbuild** (`scripts/build.mjs`), not `tsc` — three
@@ -278,21 +294,21 @@ smoke test), `npm run sidecar:build:mac` (osx-arm64 publish).
   xterm's own CSS is imported in `terminal-tab.ts` and emitted by esbuild as
   `dist/renderer/app.css`. `index.html` links both.
 - **Lucide** icons are bundled offline: `@iconify-json/lucide/icons.json` is loaded
-  via `Iconify.addCollection()` in `app.ts` (no network/API calls at runtime).
+  via `addCollection()` (from `iconify-icon`) in `app.ts` (no network/API calls at runtime).
 
 ### Two implementation notes (deviations from the original spec)
 - **node-pty needs no `electron-rebuild`.** v1.1.0 is N-API (`node-addon-api`) and
   ships prebuilt binaries for win32-x64/arm64 + darwin; N-API is ABI-stable across
   Node and Electron, so the prebuilds load directly. (There is no C++ toolchain on
-  the dev machine anyway — compiling from source would fail.)
-- **Sidecar is self-contained single-file, NOT NativeAOT.** EF Core's SQLite provider
-  does not trim/AOT cleanly; `sidecar:build` publishes `--self-contained
-  -p:PublishSingleFile=true`. Revisit AOT only if you drop EF Core for raw
-  `Microsoft.Data.Sqlite`. The csproj sets `IncludeNativeLibrariesForSelfExtract=true`
-  so `e_sqlite3.dll` is embedded in the exe and self-extracts at runtime — **do not
-  remove it**: without it the native lib sits loose beside the exe and a
-  `DllNotFoundException` (SQLitePCL `Batteries_V2.Init`) follows the moment the two
-  get separated (e.g. `npm run clean`, packaging, or copying just the exe).
+  the dev machine anyway — compiling from source would fail.) **This is why
+  persistence is a JSON file and not `better-sqlite3`:** better-sqlite3 isn't
+  N-API/ABI-stable, so it would force `electron-rebuild` and break this guarantee.
+  The session dataset is tiny, so a JSON file is the honest fit — revisit
+  `node:sqlite` (built into a new enough Electron Node) only if the data ever grows.
+- **Persistence is in-process, no second runtime.** `electron/session-store.ts` loads
+  `sessions.json` (in `userData`) into a Map and rewrites it atomically on each
+  mutation. The original design's .NET sidecar (SQLite + EF Core over a named pipe)
+  was removed as overkill for the dataset.
 - `scripts/start.mjs` strips `--openssl-legacy-provider` from `NODE_OPTIONS` before
   spawning Electron (some dev machines set it globally; Electron refuses to start
   with it).
@@ -300,17 +316,15 @@ smoke test), `npm run sidecar:build:mac` (osx-arm64 publish).
 ### Packaging & Release
 - **electron-builder** (`electron-builder.yml`) packages distributables: a Windows
   NSIS installer (`portus-Setup-<version>.exe`) and a macOS `dmg`+`zip` (arm64).
-  Local builds: `npm run dist:win` / `npm run dist:mac` (each runs `build` +
-  the matching `sidecar:build*` first); output → `release/`.
+  Local builds: `npm run dist:win` / `npm run dist:mac` (each runs `build` first);
+  output → `release/`.
 - Two config choices are load-bearing, **do not flip them**:
-  - `asar: false` — `sidecar.ts` resolves the sidecar exe via
-    `app.getAppPath()+'/dist/sidecar/…'` and `spawn`s it; node-pty is a native addon.
-    Both must be real on-disk files, not asar entries.
+  - `asar: false` — node-pty is a native addon loaded from disk; its `.node` binary
+    must be a real on-disk file, not an asar entry.
   - `npmRebuild: false` — node-pty's N-API prebuilds are ABI-stable across Electron,
     so no rebuild is needed (and the design assumes none).
 - electron-builder auto-collects the **production** dependency tree from
-  `node_modules` (node-pty); dev deps are excluded. The platform-correct sidecar must
-  already be published into `dist/sidecar/` before electron-builder runs.
+  `node_modules` (node-pty); dev deps are excluded.
 - **CI release** (`.github/workflows/release.yml`): pushing a `v*` tag builds on
   `windows-latest` + `macos-latest` (matrix), publishes installers to GitHub Releases
   via `softprops/action-gh-release` (uses the auto-provided `GITHUB_TOKEN`; no secrets
@@ -325,8 +339,8 @@ smoke test), `npm run sidecar:build:mac` (osx-arm64 publish).
    PTY just launches `claude` in the folder; restore re-runs `claude --resume <id>`
    only if an id was captured. Usage parsing in `pty-manager.ts` is a tolerant
    best-effort regex — adjust once Claude's end-of-turn format is confirmed.
-2. ~~Named pipe convention Windows vs Mac~~ — done: named pipe on Windows,
-   `UnixDomainSocketEndPoint` on Unix (note the capital `P` in `EndPoint`).
+2. ~~Sidecar process / pipe transport~~ — removed: persistence is an in-process JSON
+   store (`electron/session-store.ts`), no second process or socket.
 3. Whether to use xterm-addon-serialize for tab serialization (snapshot terminal
    buffer on hide, restore on show). Currently sessions are persisted (folder + id),
    not terminal scrollback.

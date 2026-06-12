@@ -68,10 +68,32 @@ export interface CommandPreset {
   command: string;
 }
 
+/** Theme preference: follow the OS, or force light/dark. */
+export type ThemeChoice = 'system' | 'light' | 'dark';
+
+/**
+ * General application preferences (the "General" settings section).
+ * `defaultFolder` is where the pane "+" button opens a new session ('' → the
+ * user's home folder); `sessionRetentionDays` is how long history rows are kept
+ * before they're pruned on startup; `theme` selects the color scheme.
+ */
+export interface GeneralSettings {
+  defaultFolder: string;
+  sessionRetentionDays: number;
+  theme: ThemeChoice;
+}
+
 /** User-editable application settings, persisted as JSON in the user data dir. */
 export interface AppSettings {
   commands: CommandPreset[];
+  general: GeneralSettings;
 }
+
+export const DEFAULT_GENERAL: GeneralSettings = {
+  defaultFolder: '',
+  sessionRetentionDays: 30,
+  theme: 'system',
+};
 
 /**
  * Seed commands shipped on first run (no settings file yet). Covers the common
@@ -88,7 +110,28 @@ export const DEFAULT_COMMANDS: CommandPreset[] = [
   { name: 'dotnet run', command: 'dotnet run' },
 ];
 
-export const DEFAULT_SETTINGS: AppSettings = { commands: DEFAULT_COMMANDS };
+export const DEFAULT_SETTINGS: AppSettings = {
+  commands: DEFAULT_COMMANDS,
+  general: DEFAULT_GENERAL,
+};
+
+/**
+ * Whether a terminal title is worth showing as a session label. Shells (notably
+ * PowerShell / conhost on Windows) set the OSC title to the executable's full
+ * path, e.g. "C:\\…\\powershell.exe", or to the bare working directory — neither
+ * is a useful name. A title counts as meaningful only if it doesn't look like an
+ * executable or a bare filesystem path; otherwise callers fall back to the
+ * folder name.
+ */
+export function isMeaningfulTitle(title: string | null | undefined): boolean {
+  const t = title?.trim();
+  if (!t) return false;
+  if (/\.exe$/i.test(t)) return false; // "…\powershell.exe", "cmd.exe", …
+  // A spaceless absolute path (Windows drive or POSIX root) is a shell cwd/exe
+  // title, not an agent's task summary (which reads as prose, with spaces).
+  if (!t.includes(' ') && /^([a-zA-Z]:[\\/]|[\\/])/.test(t)) return false;
+  return true;
+}
 
 export const Channels = {
   ptySpawn: 'pty:spawn',
@@ -102,6 +145,8 @@ export const Channels = {
   fsListDir: 'fs:listDir',
   fsHome: 'fs:home',
   fsDrives: 'fs:drives',
+  fsPickFolder: 'fs:pickFolder',
+  shellOpenPath: 'shell:openPath',
   contextGet: 'context:get',
   sessionList: 'session:list',
   sessionSave: 'session:save',

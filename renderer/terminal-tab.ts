@@ -5,7 +5,23 @@ import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import { WebglAddon } from '@xterm/addon-webgl';
+import type { ITheme } from '@xterm/xterm';
 import '@xterm/xterm/css/xterm.css';
+
+/** Read the current theme colors from the CSS custom properties so the terminal
+ *  tracks light/dark. xterm can't resolve `var(...)` itself (it renders to a
+ *  canvas/WebGL surface), so we resolve them here and hand it concrete hexes. */
+function readTerminalTheme(): ITheme {
+  const s = getComputedStyle(document.documentElement);
+  const v = (name: string, fallback: string): string =>
+    s.getPropertyValue(name).trim() || fallback;
+  return {
+    background: v('--color-bg', '#0d1117'),
+    foreground: v('--color-fg', '#e6edf3'),
+    cursor: v('--color-accent', '#f78166'),
+    selectionBackground: v('--color-selection', '#264f78'),
+  };
+}
 
 export class TerminalTab {
   readonly host: HTMLDivElement;
@@ -28,12 +44,7 @@ export class TerminalTab {
       fontSize: 13,
       cursorBlink: true,
       allowProposedApi: true,
-      theme: {
-        background: '#0d1117',
-        foreground: '#e6edf3',
-        cursor: '#f78166',
-        selectionBackground: '#264f78',
-      },
+      theme: readTerminalTheme(),
     });
 
     this.term.loadAddon(this.fitAddon);
@@ -66,6 +77,11 @@ export class TerminalTab {
 
   feed(data: string): void {
     this.term.write(data);
+  }
+
+  /** Re-read the CSS theme colors and apply them (called when the scheme flips). */
+  applyTheme(): void {
+    this.term.options.theme = readTerminalTheme();
   }
 
   /** Refit to the host size and report the new dimensions. */

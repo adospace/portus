@@ -11,9 +11,9 @@ publish:
   owner: adospace
   repo: portus
 
-# asar:false — the .NET sidecar (dist/sidecar/Portus.Sidecar[.exe]) and the native
-# node-pty addon are spawned/loaded from disk. sidecar.ts resolves them via
-# app.getAppPath()+'/dist/sidecar/…', which must be a real file, not an asar entry.
+# asar:false — the native node-pty addon is loaded from disk as a real file, not
+# an asar entry. (Session persistence is now an in-process JSON store, so there is
+# no longer a sidecar executable to ship.)
 asar: false
 
 # node-pty ships N-API prebuilds that are ABI-stable across Node/Electron, so no
@@ -34,6 +34,7 @@ files:
   - "!**/*.ts"
 
 win:
+  icon: build/icon.png
   target:
     - nsis
   artifactName: ${productName}-Setup-${version}.${ext}
@@ -44,6 +45,7 @@ nsis:
   allowToChangeInstallationDirectory: true
 
 mac:
+  icon: build/icon.png
   target:
     - dmg
     - zip

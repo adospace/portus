@@ -1,19 +1,21 @@
 // Electron main process: creates the window, owns the PtyManager and the
-// SidecarClient, and wires the renderer's IPC calls to both. The renderer never
-// touches node-pty or the sidecar socket directly — everything is brokered here.
-import { app, BrowserWindow, ipcMain, type IpcMainInvokeEvent } from 'electron';
+// SessionStore, and wires the renderer's IPC calls to both. The renderer never
+// touches node-pty or the session file directly — everything is brokered here.
+import { app, BrowserWindow, dialog, ipcMain, shell, type IpcMainInvokeEvent } from 'electron';
 import { access, open, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { PtyManager } from './pty-manager.js';
-import { SidecarClient } from './sidecar.js';
+import { SessionStore } from './session-store.js';
 import {
   Channels,
+  DEFAULT_GENERAL,
   DEFAULT_SETTINGS,
   type AppSettings,
   type ContextUsage,
   type DirEntry,
   type Drive,
+  type GeneralSettings,
   type PersistedSession,
   type SpawnRequest,
 } from './ipc.js';
@@ -28,7 +30,7 @@ app.commandLine.appendSwitch('disable-frame-rate-limit');
 
 let win: BrowserWindow | null = null;
 let pty: PtyManager;
-const sidecar = new SidecarClient();
+let store: SessionStore;
 
 function send(channel: string, ...args: unknown[]): void {
   win?.webContents.send(channel, ...args);
@@ -104,8 +106,10 @@ function contextLimitFor(tokens: number): number {
   return tokens > 200_000 ? 1_000_000 : 200_000;
 }
 
-/** Newest .jsonl transcript for a folder = the live session for that directory. */
-async function newestTranscript(folder: string): Promise<string | null> {
+/** Newest .jsonl transcript for a folder = the live session for that directory.
+ *  `since` (epoch ms), when given, excludes transcripts last modified before it —
+ *  so a fresh session never picks up a prior run's leftover transcript. */
+async function newestTranscript(folder: string, since?: number): Promise<string | null> {
   const dir = join(homedir(), '.claude', 'projects', encodeProjectDir(folder));
   let entries;
   try {
@@ -119,6 +123,7 @@ async function newestTranscript(folder: string): Promise<string | null> {
     const p = join(dir, e.name);
     try {
       const s = await stat(p);
+      if (since && s.mtimeMs < since) continue; // predates this session — not ours
       if (!newest || s.mtimeMs > newest.mtime) newest = { path: p, mtime: s.mtimeMs };
     } catch {
       /* skip unreadable */
@@ -127,8 +132,8 @@ async function newestTranscript(folder: string): Promise<string | null> {
   return newest?.path ?? null;
 }
 
-async function readContextUsage(folder: string): Promise<ContextUsage | null> {
-  const file = await newestTranscript(folder);
+async function readContextUsage(folder: string, since?: number): Promise<ContextUsage | null> {
+  const file = await newestTranscript(folder, since);
   if (!file) return null;
   let fh: Awaited<ReturnType<typeof open>> | undefined;
   try {
@@ -169,6 +174,41 @@ async function readContextUsage(folder: string): Promise<ContextUsage | null> {
   }
 }
 
+// --- User settings ---------------------------------------------------------
+// Settings live as a separate JSON file in the per-user app data dir, so they
+// survive restarts independently of the session store.
+
+function settingsPath(): string {
+  return join(app.getPath('userData'), 'settings.json');
+}
+
+/** Read settings from disk, normalising missing/invalid fields to defaults. */
+async function readSettings(): Promise<AppSettings> {
+  try {
+    const parsed = JSON.parse(await readFile(settingsPath(), 'utf8')) as Partial<AppSettings>;
+    const g = (parsed.general ?? {}) as Partial<GeneralSettings>;
+    const theme =
+      g.theme === 'light' || g.theme === 'dark' || g.theme === 'system'
+        ? g.theme
+        : DEFAULT_GENERAL.theme;
+    const general: GeneralSettings = {
+      defaultFolder: typeof g.defaultFolder === 'string' ? g.defaultFolder : DEFAULT_GENERAL.defaultFolder,
+      sessionRetentionDays:
+        typeof g.sessionRetentionDays === 'number' && g.sessionRetentionDays > 0
+          ? g.sessionRetentionDays
+          : DEFAULT_GENERAL.sessionRetentionDays,
+      theme,
+    };
+    return {
+      commands: Array.isArray(parsed.commands) ? parsed.commands : DEFAULT_SETTINGS.commands,
+      general,
+    };
+  } catch {
+    // No file yet (first run) or unreadable/corrupt — fall back to defaults.
+    return DEFAULT_SETTINGS;
+  }
+}
+
 function createWindow(): void {
   const isMac = process.platform === 'darwin';
   // Frameless custom chrome. macOS keeps its native traffic lights via the inset
@@ -182,7 +222,8 @@ function createWindow(): void {
     minWidth: 900,
     minHeight: 560,
     backgroundColor: '#0d1117',
-    title: 'portus',
+    title: 'PORTUS',
+    icon: join(__dirname, '../renderer/icon.png'),
     autoHideMenuBar: true,
     frame: false,
     ...macChrome,
@@ -215,6 +256,14 @@ function registerIpc(): void {
 
   ipcMain.handle(Channels.fsHome, (): string => homedir());
   ipcMain.handle(Channels.fsDrives, (): Promise<Drive[]> => listDrives());
+  ipcMain.handle(Channels.fsPickFolder, async (): Promise<string | null> => {
+    if (!win) return null;
+    const res = await dialog.showOpenDialog(win, { properties: ['openDirectory'] });
+    return res.canceled || res.filePaths.length === 0 ? null : res.filePaths[0]!;
+  });
+  ipcMain.handle(Channels.shellOpenPath, (_e, path: string): Promise<string> =>
+    shell.openPath(path),
+  );
   ipcMain.handle(Channels.fsListDir, async (_e, dirPath: string): Promise<DirEntry[]> => {
     const entries = await readdir(dirPath, { withFileTypes: true });
     return entries
@@ -226,30 +275,19 @@ function registerIpc(): void {
       });
   });
 
-  ipcMain.handle(Channels.contextGet, (_e, folder: string): Promise<ContextUsage | null> =>
-    readContextUsage(folder),
+  ipcMain.handle(Channels.contextGet, (_e, folder: string, since?: number): Promise<ContextUsage | null> =>
+    readContextUsage(folder, since),
   );
 
-  ipcMain.handle(Channels.sessionList, () => sidecar.listSessions());
-  ipcMain.handle(Channels.sessionSave, (_e, s: PersistedSession) => sidecar.saveSession(s));
-  ipcMain.handle(Channels.sessionGet, (_e, id: string) => sidecar.getSession(id));
-  ipcMain.handle(Channels.sessionDelete, (_e, id: string) => sidecar.deleteSession(id));
+  ipcMain.handle(Channels.sessionList, () => store.list());
+  ipcMain.handle(Channels.sessionSave, (_e, s: PersistedSession) => store.save(s));
+  ipcMain.handle(Channels.sessionGet, (_e, id: string) => store.get(id));
+  ipcMain.handle(Channels.sessionDelete, (_e, id: string) => store.delete(id));
   ipcMain.handle(Channels.usageAdd, (_e, sessionId: string, tIn: number, tOut: number) =>
-    sidecar.addUsage(sessionId, tIn, tOut),
+    store.addUsage(sessionId, tIn, tOut, new Date().toISOString()),
   );
 
-  // User settings live as a JSON file in the per-user app data dir, so they
-  // survive restarts independently of the sidecar's SQLite session store.
-  const settingsPath = (): string => join(app.getPath('userData'), 'settings.json');
-  ipcMain.handle(Channels.settingsGet, async (): Promise<AppSettings> => {
-    try {
-      const parsed = JSON.parse(await readFile(settingsPath(), 'utf8')) as Partial<AppSettings>;
-      return { commands: Array.isArray(parsed.commands) ? parsed.commands : DEFAULT_SETTINGS.commands };
-    } catch {
-      // No file yet (first run) or unreadable/corrupt — fall back to defaults.
-      return DEFAULT_SETTINGS;
-    }
-  });
+  ipcMain.handle(Channels.settingsGet, (): Promise<AppSettings> => readSettings());
   ipcMain.handle(Channels.settingsSave, async (_e, settings: AppSettings): Promise<void> => {
     await writeFile(settingsPath(), JSON.stringify(settings, null, 2), 'utf8');
   });
@@ -273,15 +311,16 @@ app.whenReady().then(async () => {
     onExit: (id, code) => send(Channels.ptyExit, id, code),
   });
 
-  registerIpc();
+  store = new SessionStore(join(app.getPath('userData'), 'sessions.json'));
 
-  try {
-    await sidecar.start(app.getAppPath(), join(app.getPath('userData'), 'portus.db'));
-  } catch (err) {
-    // The terminal half of the app still works without persistence; surface the
-    // failure but don't block startup.
-    console.error('[main] sidecar unavailable:', (err as Error).message);
+  // Prune session history older than the configured retention window (default 30d).
+  const { general } = await readSettings();
+  if (general.sessionRetentionDays > 0) {
+    const cutoff = new Date(Date.now() - general.sessionRetentionDays * 86_400_000).toISOString();
+    store.pruneOlderThan(cutoff);
   }
+
+  registerIpc();
 
   createWindow();
 
@@ -292,11 +331,9 @@ app.whenReady().then(async () => {
 
 app.on('window-all-closed', () => {
   pty?.killAll();
-  sidecar.dispose();
   if (process.platform !== 'darwin') app.quit();
 });
 
 app.on('before-quit', () => {
   pty?.killAll();
-  sidecar.dispose();
 });

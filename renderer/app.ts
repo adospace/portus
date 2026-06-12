@@ -2,7 +2,8 @@
 // owns tabs, sessions, and PTY routing), the LayoutManager (single/quad/six), the
 // custom title bar, the folder tree, and the session history. Also installs the
 // outer 3-pane resize splitters and routes main-process PTY events to the manager.
-import Iconify from '@iconify/iconify';
+import 'iconify-icon'; // registers the <iconify-icon> web component
+import { addCollection } from 'iconify-icon';
 import lucide from '@iconify-json/lucide/icons.json';
 import { FolderTree } from './folder-tree';
 import { SessionList } from './session-list';
@@ -11,8 +12,10 @@ import { LayoutManager } from './layout';
 import { TitleBar } from './titlebar';
 import { Splitter } from './splitter';
 import { SettingsStore } from './settings-store';
+import { ThemeManager } from './theme';
 
-Iconify.addCollection(lucide);
+// Register the Lucide icons offline so the web component never hits the network.
+addCollection(lucide);
 
 const $ = <T extends HTMLElement>(sel: string): T => {
   const el = document.querySelector<T>(sel);
@@ -36,14 +39,28 @@ const sessionList = new SessionList(
 const paneManager = new PaneManager({
   onSessionsChanged: () => sessionList.refresh(),
   settings: settingsStore,
+  onActiveFolderChanged: (folder) => void folderTree.highlightFolder(folder),
 });
+
+// Resolve and apply the theme as early as possible (from the localStorage cache)
+// so first paint matches; settings load below confirms the authoritative choice.
+// xterm reads colors once, so re-theme all terminals when the scheme flips.
+const themeManager = new ThemeManager(() => paneManager.applyTerminalTheme());
+paneManager.setThemeManager(themeManager);
 
 const layout = new LayoutManager($('#layout-grid'), paneManager);
 
-new TitleBar(
+const titleBar = new TitleBar(
   (mode) => layout.setMode(mode),
   () => paneManager.openSettings(),
 );
+
+// Let the pane manager drive layout changes (e.g. "move tab to a new group"),
+// keeping the title-bar's active-mode highlight in sync.
+paneManager.setLayoutController((mode) => {
+  layout.setMode(mode);
+  titleBar.setActive(mode);
+});
 
 const folderTree = new FolderTree(
   $('#folder-tree'),
@@ -101,10 +118,13 @@ async function init(): Promise<void> {
   wireEvents();
   installOuterSplitters();
   await settingsStore.load();
+  // Apply the persisted (authoritative) theme now that settings are loaded.
+  themeManager.set(settingsStore.general().theme);
   paneManager.setHomeDir(await window.api.fs.home());
   await folderTree.init();
   await sessionList.refresh();
-  Iconify.scan();
+  // No scan step needed: the <iconify-icon> web component renders itself and
+  // updates whenever its `icon` attribute changes — including nodes added later.
 }
 
 void init();

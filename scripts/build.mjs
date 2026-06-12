@@ -2,7 +2,7 @@
 // with esbuild and copies the renderer HTML into dist/. Tailwind CSS is built
 // separately by `npm run build:css`. Pass --watch to rebuild on change.
 import { build, context } from 'esbuild';
-import { cpSync, mkdirSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -49,6 +49,12 @@ const builds = [
 ];
 
 cpSync(resolve(root, 'renderer/index.html'), resolve(root, 'dist/renderer/index.html'));
+
+// Ship the app icon into dist so the live window + favicon can load it (the
+// packaging source stays build/icon.png; regenerate via `npm run icon`).
+const iconSrc = resolve(root, 'build/icon.png');
+if (existsSync(iconSrc)) cpSync(iconSrc, resolve(root, 'dist/renderer/icon.png'));
+else console.warn('[build] build/icon.png missing — run `npm run icon`');
 
 if (watch) {
   const ctxs = await Promise.all(builds.map((b) => context(b)));

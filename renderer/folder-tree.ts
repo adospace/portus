@@ -4,12 +4,13 @@
 // demand. Right-clicking a directory opens a context menu to start a session there.
 import type { CommandPreset, DirEntry, Drive } from '../electron/ipc';
 import { openCommandMenu } from './command-menu';
+import { revealAction } from './file-manager';
 
-// Iconify swaps each `.iconify` placeholder for a fresh SVG, so writing
-// `dataset.icon` on the original span has no effect. Render into a stable wrapper
-// instead — the Iconify observer renders the new placeholder we drop in.
+// Render an icon into a stable wrapper via the <iconify-icon> web component, so
+// listeners/transforms on the wrapper survive icon changes (e.g. the chevron we
+// rotate and re-point as folders expand).
 function setIcon(wrapper: HTMLElement, icon: string): void {
-  wrapper.innerHTML = `<span class="iconify" data-icon="${icon}"></span>`;
+  wrapper.innerHTML = `<iconify-icon icon="${icon}"></iconify-icon>`;
 }
 
 /**
@@ -146,6 +147,98 @@ export class FolderTree {
   }
 
   private openMenu(x: number, y: number, folder: string): void {
-    openCommandMenu(x, y, this.getCommands(), (cmd) => this.onRunCommand(folder, cmd.command));
+    openCommandMenu(x, y, this.getCommands(), (cmd) => this.onRunCommand(folder, cmd.command), [
+      revealAction(folder),
+    ]);
   }
+
+  // --- active-folder highlighting --------------------------------------
+  // When the active terminal tab changes, the tree reveals the session's folder
+  // (expanding ancestors) and accents its icon plus every ancestor icon, so the
+  // linked directory stands out without tinting whole rows.
+
+  private highlightedIcons: HTMLElement[] = [];
+
+  /** Reveal `path` in the tree (expanding ancestors) and accent the icons along the
+   *  chain from the root down to it. Passing null just clears any existing highlight. */
+  async highlightFolder(path: string | null): Promise<void> {
+    this.clearHighlight();
+    if (!path) return;
+    const node = await this.reveal(path);
+    if (!node) return;
+
+    // Walk up from the target wrapper to the root, accenting each node's icon. Climb
+    // one level at a time: node wrappers carry a data-path (accented), the children
+    // containers between them don't (skipped), and this.root is the stop sentinel.
+    let n: HTMLElement | null = node;
+    let isLeaf = true;
+    while (n && n !== this.root) {
+      if (n.dataset['path']) {
+        const row = n.firstElementChild as HTMLElement;
+        const icon = row.children[1] as HTMLElement; // [chevron, icon, label]
+        icon.classList.remove('text-muted');
+        icon.classList.add(isLeaf ? 'text-accent' : 'text-accent/60');
+        this.highlightedIcons.push(icon);
+        isLeaf = false;
+      }
+      n = n.parentElement;
+    }
+
+    node.firstElementChild?.scrollIntoView({ block: 'nearest' });
+  }
+
+  private clearHighlight(): void {
+    for (const icon of this.highlightedIcons) {
+      icon.classList.remove('text-accent', 'text-accent/60');
+      icon.classList.add('text-muted');
+    }
+    this.highlightedIcons = [];
+  }
+
+  /** Expand the tree down to `target`, returning its node wrapper (or the deepest
+   *  reachable ancestor if it can't be fully revealed). */
+  private async reveal(target: string): Promise<HTMLElement | null> {
+    const t = normPath(target);
+    let current = this.root.firstElementChild as HTMLElement | null;
+    if (!current || !isPathPrefix(normPath(current.dataset['path'] ?? ''), t)) return null;
+
+    while (normPath(current.dataset['path'] ?? '') !== t) {
+      await this.ensureExpanded(current);
+      const children = current.lastElementChild as HTMLElement;
+      let next: HTMLElement | null = null;
+      for (const child of Array.from(children.children) as HTMLElement[]) {
+        if (isPathPrefix(normPath(child.dataset['path'] ?? ''), t)) {
+          next = child;
+          break;
+        }
+      }
+      if (!next) return current; // can't descend further (not loaded / no access)
+      current = next;
+    }
+    return current;
+  }
+
+  /** Open a directory node if it isn't already expanded. */
+  private async ensureExpanded(wrap: HTMLElement): Promise<void> {
+    const children = wrap.lastElementChild as HTMLElement;
+    if (!children.hidden) return;
+    const row = wrap.firstElementChild as HTMLElement;
+    const chevron = row.children[0] as HTMLElement;
+    const icon = row.children[1] as HTMLElement;
+    await this.toggle(wrap, chevron, icon);
+  }
+}
+
+/** Normalise a path for comparison: lowercase, forward slashes, no trailing slash. */
+function normPath(p: string): string {
+  let s = p.toLowerCase().replace(/\\/g, '/');
+  if (s.length > 1) s = s.replace(/\/+$/, '');
+  return s;
+}
+
+/** Whether `child` equals `parent` or sits beneath it (both already normalised). */
+function isPathPrefix(parent: string, child: string): boolean {
+  if (parent === child) return true;
+  const base = parent.endsWith('/') ? parent : `${parent}/`;
+  return child.startsWith(base);
 }

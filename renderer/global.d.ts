@@ -11,7 +11,7 @@ declare global {
 // The bundled Lucide collection — typed loosely so TS doesn't parse the ~1.5MB
 // JSON for structure (esbuild handles the actual import at build time).
 declare module '@iconify-json/lucide/icons.json' {
-  const data: import('@iconify/iconify').IconifyJSON;
+  const data: import('@iconify/types').IconifyJSON;
   export default data;
 }
 

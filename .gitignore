@@ -317,7 +317,9 @@ node_modules/
 
 # portus build output and local artifacts
 /dist/
-scripts/.test.db*
+# Local SQLite test scratch files (leftover from the removed sidecar test)
+.test.db
+.test.db-*
 
 # Visual Studio 6 build log
 *.plg

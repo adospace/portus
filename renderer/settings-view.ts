@@ -5,8 +5,9 @@
 //
 // Today there is a single "Commands" section that edits the list of launch
 // commands; the section list is data-driven so more can be added later.
-import type { AppSettings, CommandPreset } from '../electron/ipc';
+import type { AppSettings, CommandPreset, GeneralSettings, ThemeChoice } from '../electron/ipc';
 import type { SettingsStore } from './settings-store';
+import type { ThemeManager } from './theme';
 
 interface Section {
   id: string;
@@ -14,7 +15,10 @@ interface Section {
   icon: string;
 }
 
-const SECTIONS: Section[] = [{ id: 'commands', label: 'Commands', icon: 'lucide:terminal' }];
+const SECTIONS: Section[] = [
+  { id: 'general', label: 'General', icon: 'lucide:settings-2' },
+  { id: 'commands', label: 'Commands', icon: 'lucide:terminal' },
+];
 
 export class SettingsView {
   readonly host: HTMLDivElement;
@@ -22,10 +26,17 @@ export class SettingsView {
   private readonly navBtns = new Map<string, HTMLButtonElement>();
   /** Working copy of the commands, edited in place until the user saves. */
   private commands: CommandPreset[];
+  /** Working copy of the general settings, edited in place until the user saves. */
+  private general: GeneralSettings;
   private activeSection = SECTIONS[0]!.id;
 
-  constructor(parent: HTMLElement, private readonly store: SettingsStore) {
+  constructor(
+    parent: HTMLElement,
+    private readonly store: SettingsStore,
+    private readonly theme: ThemeManager | null,
+  ) {
     this.commands = this.store.commands().map((c) => ({ ...c }));
+    this.general = { ...this.store.general() };
 
     this.host = document.createElement('div');
     this.host.className = 'settings-host flex bg-bg';
@@ -44,7 +55,7 @@ export class SettingsView {
       btn.className =
         'flex items-center gap-2 mx-2 px-2 py-1.5 rounded text-left text-sm hover:bg-edge/60';
       btn.innerHTML =
-        `<span class="iconify" data-icon="${section.icon}"></span><span>${section.label}</span>`;
+        `<iconify-icon icon="${section.icon}"></iconify-icon><span>${section.label}</span>`;
       btn.addEventListener('click', () => this.selectSection(section.id));
       this.navBtns.set(section.id, btn);
       nav.appendChild(btn);
@@ -68,7 +79,146 @@ export class SettingsView {
       btn.classList.toggle('text-fg', on);
       btn.classList.toggle('text-muted', !on);
     }
+    if (id === 'general') this.renderGeneral();
     if (id === 'commands') this.renderCommands();
+  }
+
+  // --- General section --------------------------------------------------
+
+  private renderGeneral(): void {
+    this.contentEl.replaceChildren();
+
+    const header = document.createElement('div');
+    header.className = 'mb-4';
+    header.innerHTML =
+      '<h2 class="text-lg font-semibold text-fg">General</h2>' +
+      '<p class="mt-1 text-sm text-muted">Defaults for new sessions and history retention.</p>';
+    this.contentEl.appendChild(header);
+
+    const fields = document.createElement('div');
+    fields.className = 'flex flex-col gap-6 max-w-xl';
+    this.contentEl.appendChild(fields);
+
+    const inputCls =
+      'bg-bg border border-edge rounded px-2 py-1 text-sm text-fg ' +
+      'focus:outline-none focus:border-accent';
+
+    // --- Theme (system / light / dark) ---
+    const themeField = document.createElement('div');
+    themeField.className = 'flex flex-col gap-1';
+    themeField.innerHTML =
+      '<label class="text-sm font-medium text-fg">Theme</label>' +
+      '<p class="text-xs text-muted">Follow the operating system, or force a light or dark scheme.</p>';
+    const themeSelect = document.createElement('select');
+    themeSelect.className = `${inputCls} mt-1 w-40 cursor-pointer hover:border-muted`;
+    for (const [value, label] of [
+      ['system', 'System'],
+      ['light', 'Light'],
+      ['dark', 'Dark'],
+    ] as const) {
+      const opt = document.createElement('option');
+      opt.value = value;
+      opt.textContent = label;
+      themeSelect.appendChild(opt);
+    }
+    themeSelect.value = this.general.theme;
+    themeSelect.addEventListener('change', () => {
+      const choice = themeSelect.value as ThemeChoice;
+      this.general.theme = choice;
+      this.theme?.set(choice); // live preview; persisted on Save
+    });
+    themeField.appendChild(themeSelect);
+
+    // --- Default folder (text input + Browse button) ---
+    const folderField = document.createElement('div');
+    folderField.className = 'flex flex-col gap-1';
+    folderField.innerHTML =
+      '<label class="text-sm font-medium text-fg">Default folder for new sessions</label>' +
+      '<p class="text-xs text-muted">Opened when you start a session from the tab bar (+) ' +
+      'button. Leave empty to use your home folder.</p>';
+
+    const folderRow = document.createElement('div');
+    folderRow.className = 'mt-1 flex items-center gap-2';
+    const folderInput = document.createElement('input');
+    folderInput.className = `${inputCls} flex-1 min-w-0 font-mono`;
+    folderInput.placeholder = 'Home folder';
+    folderInput.value = this.general.defaultFolder;
+    folderInput.addEventListener('input', () => (this.general.defaultFolder = folderInput.value));
+
+    const browse = document.createElement('button');
+    browse.className =
+      'shrink-0 flex items-center gap-2 px-3 py-1.5 rounded border border-edge text-sm ' +
+      'text-muted hover:text-fg hover:border-muted';
+    browse.innerHTML =
+      '<iconify-icon icon="lucide:folder-open"></iconify-icon><span>Browse…</span>';
+    browse.addEventListener('click', () => {
+      void (async () => {
+        const picked = await window.api.fs.pickFolder();
+        if (picked) {
+          this.general.defaultFolder = picked;
+          folderInput.value = picked;
+        }
+      })();
+    });
+
+    folderRow.append(folderInput, browse);
+    folderField.appendChild(folderRow);
+
+    // --- Retention days ---
+    const daysField = document.createElement('div');
+    daysField.className = 'flex flex-col gap-1';
+    daysField.innerHTML =
+      '<label class="text-sm font-medium text-fg">Keep sessions for (days)</label>' +
+      '<p class="text-xs text-muted">History older than this is removed on startup.</p>';
+    const daysInput = document.createElement('input');
+    daysInput.type = 'number';
+    daysInput.min = '1';
+    daysInput.className = `${inputCls} mt-1 w-28`;
+    daysInput.value = String(this.general.sessionRetentionDays);
+    daysInput.addEventListener('input', () => {
+      const n = Math.floor(Number(daysInput.value));
+      this.general.sessionRetentionDays = Number.isFinite(n) && n > 0 ? n : 30;
+    });
+    daysField.appendChild(daysInput);
+
+    fields.append(themeField, folderField, daysField);
+
+    // --- save bar ---
+    const bar = document.createElement('div');
+    bar.className = 'mt-6 flex items-center gap-3 border-t border-edge pt-4';
+    const saveBtn = document.createElement('button');
+    saveBtn.className =
+      'flex items-center gap-2 px-4 py-1.5 rounded bg-accent text-bg text-sm font-medium ' +
+      'hover:opacity-90';
+    saveBtn.innerHTML = '<iconify-icon icon="lucide:save"></iconify-icon><span>Save</span>';
+    const status = document.createElement('span');
+    status.className = 'text-sm text-idle';
+
+    saveBtn.addEventListener('click', () => {
+      void (async () => {
+        // Normalise on save so a blank/invalid day count can't be persisted.
+        const days = Math.floor(this.general.sessionRetentionDays);
+        const general: GeneralSettings = {
+          defaultFolder: this.general.defaultFolder.trim(),
+          sessionRetentionDays: Number.isFinite(days) && days > 0 ? days : 30,
+          theme: this.general.theme,
+        };
+        const next: AppSettings = { ...this.store.get(), general };
+        try {
+          await this.store.save(next);
+          this.general = { ...general };
+          daysInput.value = String(general.sessionRetentionDays);
+          status.textContent = 'Saved';
+          setTimeout(() => (status.textContent = ''), 2000);
+        } catch {
+          status.className = 'text-sm text-accent';
+          status.textContent = 'Save failed';
+        }
+      })();
+    });
+
+    bar.append(saveBtn, status);
+    this.contentEl.appendChild(bar);
   }
 
   // --- Commands section -------------------------------------------------
@@ -99,7 +249,7 @@ export class SettingsView {
     addBtn.className =
       'mt-3 flex items-center gap-2 px-3 py-1.5 rounded border border-edge text-sm ' +
       'text-muted hover:text-fg hover:border-muted';
-    addBtn.innerHTML = '<span class="iconify" data-icon="lucide:plus"></span><span>Add command</span>';
+    addBtn.innerHTML = '<iconify-icon icon="lucide:plus"></iconify-icon><span>Add command</span>';
     addBtn.addEventListener('click', () => {
       this.commands.push({ name: '', command: '' });
       renderRows();
@@ -114,7 +264,7 @@ export class SettingsView {
     saveBtn.className =
       'flex items-center gap-2 px-4 py-1.5 rounded bg-accent text-bg text-sm font-medium ' +
       'hover:opacity-90';
-    saveBtn.innerHTML = '<span class="iconify" data-icon="lucide:save"></span><span>Save</span>';
+    saveBtn.innerHTML = '<iconify-icon icon="lucide:save"></iconify-icon><span>Save</span>';
 
     const status = document.createElement('span');
     status.className = 'text-sm text-idle';
@@ -168,7 +318,7 @@ export class SettingsView {
     remove.className =
       'shrink-0 flex items-center justify-center w-8 h-8 rounded text-muted hover:text-accent';
     remove.title = 'Remove';
-    remove.innerHTML = '<span class="iconify" data-icon="lucide:trash-2"></span>';
+    remove.innerHTML = '<iconify-icon icon="lucide:trash-2"></iconify-icon>';
     remove.addEventListener('click', () => {
       this.commands.splice(index, 1);
       rerender();

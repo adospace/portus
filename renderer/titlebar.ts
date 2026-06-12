@@ -5,11 +5,10 @@
 // to clear the inset buttons.
 import type { LayoutMode } from './layout';
 
-// Iconify swaps each `.iconify` placeholder for a fresh SVG, so set an element's
-// icon by rewriting its inner placeholder (the observer renders it); listeners on
-// the wrapper itself survive.
+// Render an icon into a stable wrapper via the <iconify-icon> web component, so
+// the listener on the wrapper survives icon swaps (e.g. the max/restore glyph).
 function setIcon(wrapper: HTMLElement, icon: string): void {
-  wrapper.innerHTML = `<span class="iconify" data-icon="${icon}"></span>`;
+  wrapper.innerHTML = `<iconify-icon icon="${icon}"></iconify-icon>`;
 }
 
 export class TitleBar {
@@ -94,7 +93,7 @@ export class TitleBar {
     const settings = document.createElement('button');
     settings.className = 'flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-edge/60';
     settings.innerHTML =
-      '<span class="iconify" data-icon="lucide:settings"></span><span>Settings</span>';
+      '<iconify-icon icon="lucide:settings"></iconify-icon><span>Settings</span>';
     settings.addEventListener('click', () => {
       this.closeMenu();
       this.onOpenSettings();
@@ -106,7 +105,7 @@ export class TitleBar {
     const exit = document.createElement('button');
     exit.className = 'flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-edge/60';
     exit.innerHTML =
-      '<span class="iconify" data-icon="lucide:log-out"></span><span>Exit</span>';
+      '<iconify-icon icon="lucide:log-out"></iconify-icon><span>Exit</span>';
     exit.addEventListener('click', () => {
       this.closeMenu();
       window.api.app.quit();

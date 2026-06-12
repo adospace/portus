@@ -1,7 +1,8 @@
 // Right pane: the list of sessions (live and historical) sourced from the
-// sidecar. Clicking a row asks the app to restore that session. A search box
-// filters the list by session title, folder name, or full path.
-import type { PersistedSession } from '../electron/ipc';
+// session store. Clicking a row asks the app to restore that session. A search
+// box filters the list by session title, folder name, or full path.
+import { isMeaningfulTitle, type PersistedSession } from '../electron/ipc';
+import { fileManagerLabel, openInFileManager } from './file-manager';
 
 function baseName(p: string): string {
   const parts = p.split(/[\\/]/).filter(Boolean);
@@ -16,7 +17,7 @@ function shortTime(iso: string): string {
 
 /** The text shown as a row's primary label: the agent title, else the folder name. */
 function displayName(s: PersistedSession): string {
-  return s.title?.trim() || baseName(s.folder);
+  return isMeaningfulTitle(s.title) ? s.title!.trim() : baseName(s.folder);
 }
 
 export class SessionList {
@@ -38,7 +39,7 @@ export class SessionList {
     try {
       this.sessions = await window.api.sessions.list();
     } catch {
-      // Sidecar offline; show nothing rather than erroring.
+      // Persistence unavailable; show nothing rather than erroring.
       this.sessions = [];
     }
     this.render();
@@ -68,31 +69,77 @@ export class SessionList {
     }
 
     for (const s of visible) {
-      const row = document.createElement('button');
-      row.className =
-        'flex w-full flex-col gap-0.5 px-3 py-2 text-left cursor-pointer hover:bg-edge/60 border-b border-edge/40';
-      row.addEventListener('click', () => this.onRestore(s));
-
-      const top = document.createElement('div');
-      top.className = 'flex items-center gap-2';
-      const icon = document.createElement('span');
-      icon.className = 'iconify text-muted shrink-0';
-      icon.dataset.icon = 'lucide:folder';
-      const name = document.createElement('span');
-      name.className = 'truncate font-medium';
-      name.textContent = displayName(s);
-      const time = document.createElement('span');
-      time.className = 'ml-auto shrink-0 text-xs text-muted';
-      time.textContent = shortTime(s.lastActive);
-      top.append(icon, name, time);
-
-      const bottom = document.createElement('div');
-      bottom.className = 'truncate text-xs text-muted';
-      bottom.textContent = s.folder;
-      bottom.title = s.folder;
-
-      row.append(top, bottom);
-      this.container.appendChild(row);
+      this.container.appendChild(this.buildRow(s));
     }
+  }
+
+  private buildRow(s: PersistedSession): HTMLElement {
+    // A row can't be a <button> any more: it now hosts its own action buttons
+    // (open folder / delete), and nesting interactive controls inside a button is
+    // invalid. So it's a div whose body click restores, with hover-revealed icons.
+    const row = document.createElement('div');
+    row.className =
+      'group relative flex flex-col gap-0.5 px-3 py-2 cursor-pointer hover:bg-edge/60 border-b border-edge/40';
+
+    const top = document.createElement('div');
+    top.className = 'flex items-center gap-2';
+    const icon = document.createElement('iconify-icon');
+    icon.className = 'text-muted shrink-0';
+    icon.setAttribute('icon', 'lucide:folder');
+    const name = document.createElement('span');
+    name.className = 'truncate font-medium';
+    name.textContent = displayName(s);
+    const time = document.createElement('span');
+    time.className = 'ml-auto shrink-0 text-xs text-muted group-hover:invisible';
+    time.textContent = shortTime(s.lastActive);
+    top.append(icon, name, time);
+
+    const bottom = document.createElement('div');
+    bottom.className = 'truncate text-xs text-muted';
+    bottom.textContent = s.folder;
+    bottom.title = s.folder;
+
+    // Restore on a body click, but not when an action button was the target.
+    row.addEventListener('click', () => this.onRestore(s));
+
+    // Hover actions, pinned top-right over the timestamp.
+    const actions = document.createElement('div');
+    actions.className =
+      'absolute right-2 top-2 flex items-center gap-1 opacity-0 group-hover:opacity-100';
+
+    const open = this.actionButton('lucide:folder-open', fileManagerLabel(), 'hover:text-fg');
+    open.addEventListener('click', (e) => {
+      e.stopPropagation();
+      openInFileManager(s.folder);
+    });
+
+    const del = this.actionButton('lucide:trash-2', 'Delete session', 'hover:text-danger');
+    del.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (!window.confirm(`Delete session "${displayName(s)}"? This can't be undone.`)) return;
+      void this.deleteSession(s.id);
+    });
+
+    actions.append(open, del);
+    row.append(top, bottom, actions);
+    return row;
+  }
+
+  private actionButton(icon: string, title: string, hoverCls: string): HTMLButtonElement {
+    const btn = document.createElement('button');
+    btn.title = title;
+    btn.className =
+      `flex items-center justify-center w-6 h-6 rounded bg-panel/80 text-muted ${hoverCls}`;
+    btn.innerHTML = `<iconify-icon icon="${icon}"></iconify-icon>`;
+    return btn;
+  }
+
+  private async deleteSession(id: string): Promise<void> {
+    try {
+      await window.api.sessions.delete(id);
+    } catch {
+      /* persistence unavailable — nothing to remove */
+    }
+    await this.refresh();
   }
 }

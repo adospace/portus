@@ -41,10 +41,18 @@ const api = {
     home: (): Promise<string> => ipcRenderer.invoke(Channels.fsHome),
     listDir: (path: string): Promise<DirEntry[]> => ipcRenderer.invoke(Channels.fsListDir, path),
     drives: (): Promise<Drive[]> => ipcRenderer.invoke(Channels.fsDrives),
+    /** Open a native folder picker; resolves to the chosen path or null if cancelled. */
+    pickFolder: (): Promise<string | null> => ipcRenderer.invoke(Channels.fsPickFolder),
+  },
+  shell: {
+    /** Open a path in the OS file manager (Explorer / Finder). */
+    openPath: (path: string): Promise<string> => ipcRenderer.invoke(Channels.shellOpenPath, path),
   },
   context: {
-    get: (folder: string): Promise<ContextUsage | null> =>
-      ipcRenderer.invoke(Channels.contextGet, folder),
+    /** `since` (epoch ms) ignores transcripts older than the session's start, so a
+     *  leftover transcript from a prior run in the same folder isn't read. */
+    get: (folder: string, since?: number): Promise<ContextUsage | null> =>
+      ipcRenderer.invoke(Channels.contextGet, folder, since),
   },
   sessions: {
     list: (): Promise<PersistedSession[]> => ipcRenderer.invoke(Channels.sessionList),

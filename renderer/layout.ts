@@ -7,9 +7,9 @@ import { Splitter, type SplitterAxis } from './splitter';
 import { Pane } from './pane';
 import { PaneManager } from './pane-manager';
 
-export type LayoutMode = 'single' | 'quad' | 'six';
+export type LayoutMode = 'single' | 'double' | 'quad' | 'six';
 
-const PANE_COUNT: Record<LayoutMode, number> = { single: 1, quad: 4, six: 6 };
+const PANE_COUNT: Record<LayoutMode, number> = { single: 1, double: 2, quad: 4, six: 6 };
 const GUTTER = '5px';
 const MIN_TRACK = 140;
 
@@ -45,6 +45,7 @@ export class LayoutManager {
     this.gridEl.replaceChildren();
 
     if (mode === 'single') return this.buildSingle(panes);
+    if (mode === 'double') return this.buildDouble(panes);
     if (mode === 'quad') return this.buildQuad(panes);
     return this.buildSix(panes);
   }
@@ -53,6 +54,19 @@ export class LayoutManager {
     this.gridEl.style.gridTemplateColumns = '1fr';
     this.gridEl.style.gridTemplateRows = '1fr';
     this.gridEl.appendChild(this.slot(panes[0]!, '1', '1'));
+  }
+
+  private buildDouble(panes: Pane[]): void {
+    this.gridEl.style.gridTemplateColumns =
+      `minmax(0, var(--double-col, 1fr)) ${GUTTER} minmax(0, 1fr)`;
+    this.gridEl.style.gridTemplateRows = '1fr';
+
+    const s0 = this.slot(panes[0]!, '1', '1');
+    const s1 = this.slot(panes[1]!, '3', '1');
+    const gCol = this.gutter('col', '2', '1 / -1', 20);
+    this.gridEl.append(s0, s1, gCol);
+
+    this.addSplitter(gCol, 'col', () => s0.offsetWidth, '--double-col', 1);
   }
 
   private buildQuad(panes: Pane[]): void {

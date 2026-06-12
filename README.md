@@ -35,15 +35,22 @@ long-running agent terminals — and gets out of the way.
   *idle* (◌), or *done* (✓), plus a live elapsed timer while it's working — so you
   know which sessions need attention without clicking into them.
 - **Start sessions where the work is.** The left pane is a lazy folder tree rooted
-  at a drive/volume you pick; right-click any directory to launch an agent there.
+  at a drive/volume you pick; right-click any directory to launch an agent there or
+  open it in your OS file manager. Switching tabs highlights the active session's
+  folder and its parents in the tree, so you always see where you are.
 - **Persistence + cost tracking.** Sessions survive app restarts, and token usage is
   accumulated into a running USD cost per session, shown in the status bar and the
   session-history pane.
 - **Searchable session history.** The right pane lists every session by the title the
   agent CLI generates for its task (falling back to the folder name) plus the working
   path; a search box filters by title, name, or path, and one click restores a session.
+  Hover a row to open its folder in the file manager or delete it from history.
 - **Flexible layouts.** Split the center into 1, 4 (2×2), or 6 (3×2) panes, each its
-  own tab group, and drag the gutters to resize.
+  own tab group, and drag the gutters to resize. Right-click a tab to relocate it
+  between panes, open its folder, or close it.
+- **Light & dark themes.** Follow the OS, or force light/dark — set it in
+  **Settings ▸ General**, where you can also pick the default folder for new sessions
+  and how long session history is kept.
 
 ```
 ┌─────────────┬──────────────────────────────┬─────────────────┐
@@ -87,15 +94,12 @@ it, you need the agent CLI installed and on your `PATH`, e.g.
 
 ## Build from source
 
-Requires **Node.js 20+**, **npm**, and the **.NET 10 SDK**.
+Requires **Node.js 20+** and **npm**.
 
 ```bash
 npm install             # node-pty ships N-API prebuilds — no native rebuild needed
-npm run sidecar:build   # publish the .NET sidecar → dist/sidecar/ (once, or after C# changes)
 npm start               # build + launch Electron
 ```
-
-Use `npm run sidecar:build:mac` (osx-arm64) instead when building on macOS.
 
 ### Package distributables
 
@@ -104,8 +108,8 @@ npm run dist:win        # → release/portus-Setup-<version>.exe   (NSIS install
 npm run dist:mac        # → release/portus-<version>-arm64.dmg + .zip
 ```
 
-Each `dist:*` script builds the renderer/main bundles and the matching platform
-sidecar before running electron-builder. Output lands in `release/`.
+Each `dist:*` script builds the renderer/main bundles before running
+electron-builder. Output lands in `release/`.
 
 ## Releasing
 
@@ -119,17 +123,14 @@ git push --follow-tags
 
 ## Architecture
 
-Two processes:
+A single Electron app. The main process is the sole broker — it owns the UI window,
+node-pty PTY management, and session persistence; the renderer reaches privileged
+work only through the `window.api` contextBridge, never node-pty or the filesystem
+directly. Sessions, usage, and cost totals are persisted in-process as a small JSON
+file in the per-user app data dir (no database, no second runtime).
 
-- **Electron shell** — UI, xterm.js terminal emulation, and node-pty PTY management.
-  The main process is the sole broker; the renderer reaches privileged work only
-  through the `window.api` contextBridge.
-- **.NET sidecar** — session persistence, usage tracking, and cost aggregation
-  (SQLite via EF Core). Auto-started by Electron and spoken to over a named pipe
-  (Windows) / Unix domain socket (macOS) with newline-delimited JSON.
-
-Built with Electron, TypeScript (strict), xterm.js, node-pty, Tailwind CSS v4, and a
-.NET 10 sidecar. See [`CLAUDE.md`](CLAUDE.md) for the full design and file map.
+Built with Electron, TypeScript (strict), xterm.js, node-pty, and Tailwind CSS v4.
+See [`CLAUDE.md`](CLAUDE.md) for the full design and file map.
 
 ## License
 

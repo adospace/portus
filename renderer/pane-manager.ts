@@ -7,10 +7,19 @@ import { Pane } from './pane';
 import type { Tab } from './pane';
 import { SettingsView } from './settings-view';
 import { openCommandMenu } from './command-menu';
+import { openContextMenu, type ContextMenuEntry } from './context-menu';
+import { revealAction } from './file-manager';
+import type { LayoutMode } from './layout';
 import type { SettingsStore } from './settings-store';
+import type { ThemeManager } from './theme';
+import { isMeaningfulTitle } from '../electron/ipc';
 
 /** Synthetic, app-wide id for the single Settings tab (it has no PTY). */
 const SETTINGS_ID = 'settings';
+
+/** Don't surface a tab's elapsed timer until it's been busy this long — avoids a
+ *  flash of "00:00" when switching tabs briefly marks a session busy. */
+const ELAPSED_MIN_MS = 1500;
 
 const $ = <T extends HTMLElement>(sel: string): T => {
   const el = document.querySelector<T>(sel);
@@ -30,6 +39,9 @@ export interface PaneManagerOpts {
   onSessionsChanged: () => void | Promise<void>;
   /** Settings store — source of the launch commands and the Settings tab editor. */
   settings: SettingsStore;
+  /** The active terminal tab's folder changed (null = no terminal tab active),
+   *  so the folder tree can highlight the linked directory. */
+  onActiveFolderChanged?: (folder: string | null) => void;
 }
 
 export class PaneManager {
@@ -37,15 +49,41 @@ export class PaneManager {
   private active: Pane | null = null;
   private readonly ptyIndex = new Map<string, Pane>();
   private homeDir = '';
+  // Set by app.ts so the manager can request a layout change (e.g. splitting a
+  // single view into a double to relocate a tab). Keeps the title-bar highlight
+  // in sync — the manager doesn't own the LayoutManager.
+  private requestLayout: ((mode: LayoutMode) => void) | null = null;
   // Status-bar value spans, resolved once. Re-querying the document on every
   // status transition (which fires on PTY output) competes with keystroke
   // dispatch on the renderer's single main thread and makes typing feel laggy.
   private readonly statusEls = new Map<string, HTMLElement>();
+  // Last folder reported to onActiveFolderChanged; guards against re-notifying on
+  // the hot path (status/usage/context repaints all call paintStatusBar).
+  private lastNotifiedFolder: string | null = null;
+  // Set by app.ts once both exist; the Settings tab's theme selector drives it.
+  private themeManager: ThemeManager | null = null;
 
   constructor(private readonly opts: PaneManagerOpts) {}
 
   setHomeDir(dir: string): void {
     this.homeDir = dir;
+  }
+
+  setThemeManager(theme: ThemeManager): void {
+    this.themeManager = theme;
+  }
+
+  /** Re-apply the active theme to every terminal (xterm reads colors once, so a
+   *  light/dark switch needs an explicit re-theme). Called by ThemeManager. */
+  applyTerminalTheme(): void {
+    for (const pane of this.panes) {
+      for (const tab of pane.tabList()) tab.term.applyTheme?.();
+    }
+  }
+
+  /** Wire the manager to the layout controller (set once at startup). */
+  setLayoutController(fn: (mode: LayoutMode) => void): void {
+    this.requestLayout = fn;
   }
 
   getActive(): Pane | null {
@@ -98,8 +136,9 @@ export class PaneManager {
       onNewTab: (pane, anchor) => {
         this.setActivePane(pane);
         const r = anchor.getBoundingClientRect();
+        const folder = this.opts.settings.general().defaultFolder || this.homeDir;
         openCommandMenu(r.left, r.bottom, this.opts.settings.commands(), (cmd) =>
-          void this.createSession(this.homeDir, { command: cmd.command }),
+          void this.createSession(folder, { command: cmd.command }),
         );
       },
       onTabClicked: (id) => {
@@ -109,6 +148,7 @@ export class PaneManager {
         this.setActivePane(pane);
       },
       onCloseTab: (id) => this.closeTab(id),
+      onTabContextMenu: (id, x, y) => this.openTabMenu(id, x, y),
       onEmpty: () => this.paintStatusBar(),
       resize: (id, cols, rows) => window.api.pty.resize(id, cols, rows),
     });
@@ -170,6 +210,7 @@ export class PaneManager {
       title: null,
       status: 'idle',
       busyStart: null,
+      startedAt: Date.now(),
       totalCost: 0,
       totalTokens: 0,
       context: null,
@@ -186,7 +227,8 @@ export class PaneManager {
     // history pane after the terminal is gone.
     term.onTitle((title) => {
       const t = title.trim();
-      if (!t || tab.title === t) return;
+      // Ignore shell-set titles (the bare exe path / cwd) — keep the folder name.
+      if (!isMeaningfulTitle(t) || tab.title === t) return;
       tab.title = t;
       pane.setTitle(ptyId, t);
       void this.persistSession(tab, opts.claudeId ?? null);
@@ -206,13 +248,13 @@ export class PaneManager {
       });
       await this.opts.onSessionsChanged();
     } catch {
-      /* sidecar offline — session still runs, just isn't persisted */
+      /* persistence failed — session still runs, just isn't saved */
     }
   }
 
   /** Re-save a session's current snapshot (folder/title/totals). Used when the
-   *  title changes mid-session. Token/cost totals are owned by the sidecar, so we
-   *  pass 0 to avoid clobbering them (it only overwrites when totals are > 0). */
+   *  title changes mid-session. Token/cost totals are owned by the session store,
+   *  so we pass 0 to avoid clobbering them (it only overwrites when totals > 0). */
   private async persistSession(tab: Tab, claudeId: string | null): Promise<void> {
     try {
       await window.api.sessions.save({
@@ -227,7 +269,7 @@ export class PaneManager {
       });
       await this.opts.onSessionsChanged();
     } catch {
-      /* sidecar offline */
+      /* persistence failed */
     }
   }
 
@@ -245,7 +287,7 @@ export class PaneManager {
     if (!pane) return;
     this.setActivePane(pane);
 
-    const view = new SettingsView(pane.stackEl, this.opts.settings);
+    const view = new SettingsView(pane.stackEl, this.opts.settings, this.themeManager);
     const tab: Tab = {
       kind: 'settings',
       persistentId: SETTINGS_ID,
@@ -254,6 +296,7 @@ export class PaneManager {
       title: null,
       status: 'idle',
       busyStart: null,
+      startedAt: Date.now(),
       totalCost: 0,
       totalTokens: 0,
       context: null,
@@ -274,6 +317,92 @@ export class PaneManager {
     this.ptyIndex.delete(ptyId);
     pane.removeTab(ptyId);
     this.paintStatusBar();
+  }
+
+  // --- tab context menu / relocation ------------------------------------
+
+  /** Right-click on a tab: offer to move it to a neighbouring pane (only the
+   *  directions that have one, given the current layout) and to close it. */
+  private openTabMenu(ptyId: string, x: number, y: number): void {
+    const pane = this.ptyIndex.get(ptyId);
+    if (!pane || !pane.has(ptyId)) return;
+
+    const entries: ContextMenuEntry[] = [];
+
+    // Terminal tabs are tied to a folder — offer to open it in the file manager.
+    const tab = pane.get(ptyId);
+    if (tab?.kind === 'terminal' && tab.folder) {
+      entries.push(revealAction(tab.folder), 'separator');
+    }
+
+    if (this.panes.length === 1 && this.requestLayout) {
+      // Single view: there's no neighbour to move into yet — offer to split into
+      // a double view, relocating this tab into the new group on the right.
+      entries.push({
+        icon: 'lucide:arrow-right',
+        label: 'Move to new tab group right',
+        onSelect: () => this.moveToNewGroupRight(ptyId),
+      });
+    } else {
+      for (const m of this.paneNeighbors(this.panes.indexOf(pane))) {
+        entries.push({ icon: m.icon, label: m.label, onSelect: () => this.moveTab(ptyId, m.target) });
+      }
+    }
+    // Close always sits last; only separate it when moves precede it.
+    if (entries.length) entries.push('separator');
+    entries.push({
+      icon: 'lucide:x',
+      label: 'Close',
+      danger: true,
+      onSelect: () => this.closeTab(ptyId),
+    });
+
+    openContextMenu(x, y, entries);
+  }
+
+  /** The pane indices reachable from `index` by one step in each direction,
+   *  derived from the implicit grid of the current pane count (1 / 2×2 / 3×2). */
+  private paneNeighbors(
+    index: number,
+  ): { icon: string; label: string; target: number }[] {
+    const count = this.panes.length;
+    const cols = count === 6 ? 3 : count >= 2 ? 2 : 1;
+    const rows = Math.max(1, Math.floor(count / cols));
+    const row = Math.floor(index / cols);
+    const col = index % cols;
+    const out: { icon: string; label: string; target: number }[] = [];
+    if (col > 0) out.push({ icon: 'lucide:arrow-left', label: 'Move left', target: index - 1 });
+    if (col < cols - 1) out.push({ icon: 'lucide:arrow-right', label: 'Move right', target: index + 1 });
+    if (row > 0) out.push({ icon: 'lucide:arrow-up', label: 'Move up', target: index - cols });
+    if (row < rows - 1) out.push({ icon: 'lucide:arrow-down', label: 'Move down', target: index + cols });
+    return out;
+  }
+
+  /** Relocate a tab to another pane without disposing its terminal, mirroring
+   *  the shrink path: release → adopt → re-point the ptyIndex → re-activate. */
+  private moveTab(ptyId: string, targetIndex: number): void {
+    const from = this.ptyIndex.get(ptyId);
+    const to = this.panes[targetIndex];
+    if (!from || !to || from === to) return;
+
+    const tab = from.releaseTab(ptyId);
+    if (!tab) return;
+    to.adoptTab(tab);
+    this.ptyIndex.set(ptyId, to);
+    to.activateTab(ptyId);
+
+    // releaseTab leaves the source with no active tab — surface its next one (or
+    // let it sit empty, which is fine in a multi-pane layout).
+    if (!from.activeTab() && from.count() > 0) from.activateTab(from.tabIds()[0]!);
+
+    this.setActivePane(to);
+  }
+
+  /** Split a single view into a double, moving the tab into the new right pane. */
+  private moveToNewGroupRight(ptyId: string): void {
+    if (!this.requestLayout) return;
+    this.requestLayout('double'); // grows the pane set to 2 (right pane is index 1)
+    this.moveTab(ptyId, 1);
   }
 
   // --- PTY event routing ------------------------------------------------
@@ -305,7 +434,7 @@ export class PaneManager {
         if (this.isActiveTab(id)) this.paintStatusBar();
         await this.opts.onSessionsChanged();
       } catch {
-        /* sidecar offline */
+        /* persistence failed */
       }
     })();
   }
@@ -344,12 +473,21 @@ export class PaneManager {
     // shows the neutral placeholders.
     const active = this.active?.activeTab() ?? null;
     const tab = active && active.kind === 'terminal' ? active : null;
+    this.notifyActiveFolder(tab ? tab.folder : null);
     this.setText(this.statusValue('status-folder'), tab ? tab.folder : '—');
     this.paintContextStatus(tab);
     this.setText(
       this.statusValue('status-elapsed'),
       tab && tab.busyStart ? fmtElapsed(Date.now() - tab.busyStart) : '—',
     );
+  }
+
+  /** Tell the folder tree which directory the active session lives in — but only
+   *  when it actually changed, since paintStatusBar runs on every PTY repaint. */
+  private notifyActiveFolder(folder: string | null): void {
+    if (folder === this.lastNotifiedFolder) return;
+    this.lastNotifiedFolder = folder;
+    this.opts.onActiveFolderChanged?.(folder);
   }
 
   /** Poll each terminal tab's context-window occupancy from its transcript and
@@ -359,7 +497,9 @@ export class PaneManager {
       for (const tab of pane.tabList()) {
         if (tab.kind !== 'terminal') continue;
         try {
-          tab.context = await window.api.context.get(tab.folder);
+          // Pass startedAt so a transcript left over from a prior run in the same
+          // folder is ignored — only this session's own activity drives the gauge.
+          tab.context = await window.api.context.get(tab.folder, tab.startedAt);
         } catch {
           tab.context = null;
         }
@@ -388,7 +528,8 @@ export class PaneManager {
   tickElapsed(): void {
     for (const pane of this.panes) {
       for (const tab of pane.tabList()) {
-        this.setText(tab.elapsedEl, tab.busyStart ? fmtElapsed(Date.now() - tab.busyStart) : '');
+        const ms = tab.busyStart ? Date.now() - tab.busyStart : 0;
+        this.setText(tab.elapsedEl, ms >= ELAPSED_MIN_MS ? fmtElapsed(ms) : '');
       }
     }
     const active = this.active?.activeTab();

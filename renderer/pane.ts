@@ -18,6 +18,8 @@ export interface TabContent {
   fit(): { cols: number; rows: number };
   dispose(): void;
   feed?(data: string): void;
+  /** Re-read theme colors after a light/dark switch (terminal-only). */
+  applyTheme?(): void;
 }
 
 /** What kind of content a tab holds — terminals route PTY events, views don't. */
@@ -32,6 +34,9 @@ export interface Tab {
   title: string | null;
   status: SessionStatus;
   busyStart: number | null;
+  /** When this session/tab was created (epoch ms). Used to ignore transcripts
+   *  that predate it, so a fresh session never reads a prior run's context. */
+  startedAt: number;
   totalCost: number;
   totalTokens: number;
   /** Context-window occupancy of the backing session, polled from its transcript. */
@@ -53,6 +58,8 @@ export interface PaneCallbacks {
   onTabClicked: (ptyId: string) => void;
   /** The close (×) on a tab was clicked. */
   onCloseTab: (ptyId: string) => void;
+  /** A tab was right-clicked — open its context menu at (x, y). */
+  onTabContextMenu: (ptyId: string, x: number, y: number) => void;
   /** The last tab was removed from this pane. */
   onEmpty: (pane: Pane) => void;
   /** Fit produced new dimensions — resize the backing PTY. */
@@ -71,10 +78,11 @@ function fmtTokens(n: number): string {
   return String(n);
 }
 
-// Iconify swaps each `.iconify` placeholder for a fresh SVG, so set an element's
-// icon by rewriting its inner placeholder; listeners on the wrapper survive.
+// Render an icon into a stable wrapper via the <iconify-icon> web component, so
+// listeners/transforms on the wrapper survive icon changes (the component renders
+// itself immediately and re-renders when its `icon` attribute changes).
 function setIcon(wrapper: HTMLElement, icon: string): void {
-  wrapper.innerHTML = `<span class="iconify" data-icon="${icon}"></span>`;
+  wrapper.innerHTML = `<iconify-icon icon="${icon}"></iconify-icon>`;
 }
 
 export class Pane {
@@ -259,6 +267,10 @@ export class Pane {
       this.cb.onCloseTab(tab.ptyId);
     });
     btn.addEventListener('click', () => this.cb.onTabClicked(tab.ptyId));
+    btn.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      this.cb.onTabContextMenu(tab.ptyId, e.clientX, e.clientY);
+    });
 
     // Non-terminal views (Settings) get a static icon + fixed label, no elapsed.
     if (tab.kind === 'settings') {

@@ -4,6 +4,14 @@
 // runs it in a freshly spawned console; an empty command means a plain shell.
 import type { CommandPreset } from '../electron/ipc';
 
+/** An extra non-command action appended below the command list (e.g. "Open in
+ *  File Explorer" on the folder tree's right-click menu). */
+export interface MenuAction {
+  icon: string;
+  label: string;
+  onSelect: () => void;
+}
+
 let active: HTMLElement | null = null;
 
 function onDocPointerDown(e: MouseEvent): void {
@@ -25,6 +33,7 @@ export function openCommandMenu(
   y: number,
   commands: CommandPreset[],
   onPick: (cmd: CommandPreset) => void,
+  extra: MenuAction[] = [],
 ): void {
   closeCommandMenu();
 
@@ -59,6 +68,30 @@ export function openCommandMenu(
       onPick(cmd);
     });
     menu.appendChild(item);
+  }
+
+  if (extra.length > 0) {
+    if (commands.length > 0) {
+      const hr = document.createElement('div');
+      hr.className = 'my-1 border-t border-edge';
+      menu.appendChild(hr);
+    }
+    for (const action of extra) {
+      const item = document.createElement('button');
+      item.className =
+        'flex w-full items-center gap-2 px-3 py-1.5 text-left text-fg hover:bg-edge/60';
+      const icon = document.createElement('span');
+      icon.className = 'shrink-0 flex items-center text-muted';
+      icon.innerHTML = `<iconify-icon icon="${action.icon}"></iconify-icon>`;
+      const label = document.createElement('span');
+      label.textContent = action.label;
+      item.append(icon, label);
+      item.addEventListener('click', () => {
+        closeCommandMenu();
+        action.onSelect();
+      });
+      menu.appendChild(item);
+    }
   }
 
   document.body.appendChild(menu);
