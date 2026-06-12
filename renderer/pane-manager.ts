@@ -8,7 +8,7 @@ import type { Tab } from './pane';
 import { SettingsView } from './settings-view';
 import { openCommandMenu } from './command-menu';
 import { openContextMenu, type ContextMenuEntry } from './context-menu';
-import { revealAction } from './file-manager';
+import { copyPathAction, revealAction } from './file-manager';
 import type { LayoutMode } from './layout';
 import type { SettingsStore } from './settings-store';
 import type { ThemeManager } from './theme';
@@ -329,10 +329,11 @@ export class PaneManager {
 
     const entries: ContextMenuEntry[] = [];
 
-    // Terminal tabs are tied to a folder — offer to open it in the file manager.
+    // Terminal tabs are tied to a folder — offer to open it in the file manager
+    // and to copy its path; both sit at the top of the menu.
     const tab = pane.get(ptyId);
     if (tab?.kind === 'terminal' && tab.folder) {
-      entries.push(revealAction(tab.folder), 'separator');
+      entries.push(revealAction(tab.folder), copyPathAction(tab.folder), 'separator');
     }
 
     if (this.panes.length === 1 && this.requestLayout) {

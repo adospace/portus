@@ -2,7 +2,7 @@
 // session store. Clicking a row asks the app to restore that session. A search
 // box filters the list by session title, folder name, or full path.
 import { isMeaningfulTitle, type PersistedSession } from '../electron/ipc';
-import { fileManagerLabel, openInFileManager } from './file-manager';
+import { copyPath, copyPathLabel, fileManagerLabel, openInFileManager } from './file-manager';
 
 function baseName(p: string): string {
   const parts = p.split(/[\\/]/).filter(Boolean);
@@ -113,6 +113,12 @@ export class SessionList {
       openInFileManager(s.folder);
     });
 
+    const copy = this.actionButton('lucide:copy', copyPathLabel, 'hover:text-fg');
+    copy.addEventListener('click', (e) => {
+      e.stopPropagation();
+      copyPath(s.folder);
+    });
+
     const del = this.actionButton('lucide:trash-2', 'Delete session', 'hover:text-danger');
     del.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -120,7 +126,7 @@ export class SessionList {
       void this.deleteSession(s.id);
     });
 
-    actions.append(open, del);
+    actions.append(open, copy, del);
     row.append(top, bottom, actions);
     return row;
   }

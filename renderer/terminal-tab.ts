@@ -60,6 +60,56 @@ export class TerminalTab {
     } catch {
       console.warn('[term] WebGL renderer unavailable, using canvas fallback');
     }
+
+    this.wireClipboard();
+  }
+
+  /**
+   * Explicit clipboard handling. xterm's default relies on the browser's native
+   * paste, which Electron gates behind a permission (and a competing default-menu
+   * paste accelerator), so pastes into the agent prompt silently fail. We drive it
+   * ourselves through Electron's clipboard (exposed on `window.api.clipboard`):
+   *   • Ctrl/Cmd+V (and Ctrl+Shift+V) → paste, honouring bracketed-paste mode.
+   *   • Ctrl/Cmd+Shift+C → copy the current selection (when there is one).
+   *   • Right-click → copy the selection if any, else paste (classic terminal).
+   */
+  private wireClipboard(): void {
+    this.term.attachCustomKeyEventHandler((e) => {
+      if (e.type !== 'keydown') return true;
+      const mod = window.api.platform === 'darwin' ? e.metaKey : e.ctrlKey;
+      if (!mod) return true;
+
+      if (e.key === 'v' || e.key === 'V') {
+        e.preventDefault();
+        this.paste();
+        return false;
+      }
+      if (e.shiftKey && (e.key === 'c' || e.key === 'C') && this.copySelection()) {
+        e.preventDefault();
+        return false;
+      }
+      return true;
+    });
+
+    this.host.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      if (!this.copySelection()) this.paste();
+      else this.term.clearSelection();
+    });
+  }
+
+  /** Write the clipboard text into the terminal (respects bracketed-paste mode). */
+  private paste(): void {
+    const text = window.api.clipboard.readText();
+    if (text) this.term.paste(text);
+  }
+
+  /** Copy the current selection to the clipboard; returns false if nothing selected. */
+  private copySelection(): boolean {
+    const sel = this.term.getSelection();
+    if (!sel) return false;
+    window.api.clipboard.writeText(sel);
+    return true;
   }
 
   onInput(cb: (data: string) => void): void {

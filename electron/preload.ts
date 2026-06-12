@@ -1,7 +1,7 @@
 // Context-isolated bridge. Exposes a typed `window.api` to the renderer; all
 // privileged work happens in the main process. The matching type declaration
 // lives in renderer/global.d.ts.
-import { contextBridge, ipcRenderer } from 'electron';
+import { clipboard, contextBridge, ipcRenderer } from 'electron';
 import {
   Channels,
   type AppSettings,
@@ -47,6 +47,13 @@ const api = {
   shell: {
     /** Open a path in the OS file manager (Explorer / Finder). */
     openPath: (path: string): Promise<string> => ipcRenderer.invoke(Channels.shellOpenPath, path),
+  },
+  clipboard: {
+    // Electron's clipboard module works in the renderer without the permission
+    // gating that blocks navigator.clipboard, so it's the reliable path for the
+    // terminal's paste/copy. Sync calls — no IPC round-trip.
+    readText: (): string => clipboard.readText(),
+    writeText: (text: string): void => clipboard.writeText(text),
   },
   context: {
     /** `since` (epoch ms) ignores transcripts older than the session's start, so a

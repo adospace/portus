@@ -4,7 +4,7 @@
 // demand. Right-clicking a directory opens a context menu to start a session there.
 import type { CommandPreset, DirEntry, Drive } from '../electron/ipc';
 import { openCommandMenu } from './command-menu';
-import { revealAction } from './file-manager';
+import { copyPathAction, revealAction } from './file-manager';
 
 // Render an icon into a stable wrapper via the <iconify-icon> web component, so
 // listeners/transforms on the wrapper survive icon changes (e.g. the chevron we
@@ -149,6 +149,7 @@ export class FolderTree {
   private openMenu(x: number, y: number, folder: string): void {
     openCommandMenu(x, y, this.getCommands(), (cmd) => this.onRunCommand(folder, cmd.command), [
       revealAction(folder),
+      copyPathAction(folder),
     ]);
   }
 

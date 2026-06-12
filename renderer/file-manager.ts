@@ -1,6 +1,8 @@
-// Helpers for revealing a folder in the OS file manager. Shared by the folder
-// tree's right-click menu, the tab context menu, and the session-history rows.
+// Helpers for revealing a folder in the OS file manager and copying its path.
+// Shared by the folder tree's right-click menu, the tab context menu, and the
+// session-history rows.
 const ICON = 'lucide:folder-open';
+const COPY_ICON = 'lucide:copy';
 
 /** Platform-appropriate label for the "open folder in the OS file manager" action. */
 export function fileManagerLabel(): string {
@@ -21,4 +23,16 @@ export function revealAction(folder: string): { icon: string; label: string; onS
 
 export function openInFileManager(folder: string): void {
   void window.api.shell.openPath(folder);
+}
+
+/** Label for the "copy folder path to clipboard" action. */
+export const copyPathLabel = 'Copy folder path';
+
+/** A ready-made context-menu action entry for copying `folder` to the clipboard. */
+export function copyPathAction(folder: string): { icon: string; label: string; onSelect: () => void } {
+  return { icon: COPY_ICON, label: copyPathLabel, onSelect: () => copyPath(folder) };
+}
+
+export function copyPath(folder: string): void {
+  window.api.clipboard.writeText(folder);
 }
