@@ -70,6 +70,8 @@ export class TerminalTab {
    * paste accelerator), so pastes into the agent prompt silently fail. We drive it
    * ourselves through Electron's clipboard (exposed on `window.api.clipboard`):
    *   • Ctrl/Cmd+V (and Ctrl+Shift+V) → paste, honouring bracketed-paste mode.
+   *   • Ctrl/Cmd+C → copy the current selection if there is one; otherwise fall
+   *     through so the terminal still receives it as SIGINT (classic behaviour).
    *   • Ctrl/Cmd+Shift+C → copy the current selection (when there is one).
    *   • Right-click → copy the selection if any, else paste (classic terminal).
    */
@@ -84,9 +86,16 @@ export class TerminalTab {
         this.paste();
         return false;
       }
-      if (e.shiftKey && (e.key === 'c' || e.key === 'C') && this.copySelection()) {
-        e.preventDefault();
-        return false;
+      if (e.key === 'c' || e.key === 'C') {
+        // Copy when there's a selection (Ctrl/Cmd+C *or* +Shift+C). With no
+        // selection, plain Ctrl/Cmd+C must pass through so the agent still gets
+        // SIGINT; only Shift+C is swallowed (it's never an interrupt chord).
+        if (this.copySelection()) {
+          this.term.clearSelection();
+          e.preventDefault();
+          return false;
+        }
+        return !e.shiftKey;
       }
       return true;
     });

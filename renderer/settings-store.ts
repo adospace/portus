@@ -33,6 +33,16 @@ export class SettingsStore {
     return this.settings.general;
   }
 
+  pinned(): string[] {
+    return this.settings.pinnedFolders;
+  }
+
+  /** Replace and persist just the pinned-folder list (other settings untouched). */
+  async setPinned(folders: string[]): Promise<void> {
+    this.settings = { ...this.settings, pinnedFolders: folders };
+    await window.api.settings.save(this.settings);
+  }
+
   /** Replace and persist the full settings object. */
   async save(next: AppSettings): Promise<void> {
     this.settings = next;

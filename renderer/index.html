@@ -81,6 +81,14 @@
           </select>
         </header>
         <div id="folder-tree" class="scroll-area flex-1 overflow-auto py-1 text-sm"></div>
+        <!-- Pinned folders: hidden until at least one folder is pinned. -->
+        <div id="pinned-panel" class="flex flex-col shrink-0 max-h-[45%] border-t border-edge" hidden>
+          <header class="flex items-center gap-2 px-3 h-8 shrink-0">
+            <iconify-icon class="text-muted shrink-0" icon="lucide:pin"></iconify-icon>
+            <span class="text-xs font-semibold uppercase tracking-wide text-muted">Pinned</span>
+          </header>
+          <div id="pinned-list" class="scroll-area flex-1 overflow-auto pb-1 text-sm"></div>
+        </div>
       </aside>
 
       <!-- Splitter: left | center -->

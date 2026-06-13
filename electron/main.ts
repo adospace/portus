@@ -258,6 +258,9 @@ async function readSettings(): Promise<AppSettings> {
     return {
       commands: Array.isArray(parsed.commands) ? parsed.commands : DEFAULT_SETTINGS.commands,
       general,
+      pinnedFolders: Array.isArray(parsed.pinnedFolders)
+        ? parsed.pinnedFolders.filter((f): f is string => typeof f === 'string')
+        : DEFAULT_SETTINGS.pinnedFolders,
     };
   } catch {
     // No file yet (first run) or unreadable/corrupt — fall back to defaults.

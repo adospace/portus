@@ -71,9 +71,9 @@ JSON file (`sessions.json`) in the per-user app data dir — see `electron/sessi
 └─────────────┴──────────────────────────────┴─────────────────┘
 ```
 
-**Left pane** — drive/volume selector (header) + folder tree (fs.readdir, lazy-loaded) rooted at the selected drive; defaults to the drive holding the user's home folder; right-click → "New session here"
+**Left pane** — drive/volume selector (header) + folder tree (fs.readdir, lazy-loaded) rooted at the selected drive; defaults to the drive holding the user's home folder; right-click → "New session here". Clicking a directory **selects** it (persistent gray row tint) and reports the selection so the session list can mark same-folder rows with a gray edge line.
 **Center pane** — tabbed xterm.js terminals, tab shows: busy indicator (● animated / ◌ idle), folder name, elapsed time when busy
-**Right pane** — session list (current + past), click to restore, shows folder + timestamp
+**Right pane** — session list (current + past), click to restore, shows folder + timestamp; each row can show two left-edge folder-match lines: **gray** = same folder as the one selected in the tree, **orange** = same folder as the active tab (so same-folder sessions stand out)
 **Bottom bar** — active tab: working folder, context-window used, elapsed (right)
 
 ## Core Features (v1)
@@ -124,6 +124,19 @@ JSON file (`sessions.json`) in the per-user app data dir — see `electron/sessi
   transcript, so two live sessions started in the same folder can share a reading
   until per-session Claude ids are captured.
 
+### Pinned folders
+- **What.** A persistent quick-access list at the **bottom of the left pane**
+  (`#pinned-panel`, hidden until non-empty). Pin a folder via **"Pin folder"** in
+  the folder-tree right-click menu (`folder-tree.ts`) or a terminal tab's
+  right-click menu (`pane-manager.ts` `openTabMenu`). Clicking a pinned entry opens
+  the shared `command-menu.ts` popup to launch a session there (same flow as the `+`
+  button); hover-× or right-click ▸ Unpin removes it.
+- **Persistence.** Stored as `pinnedFolders: string[]` in `settings.json`
+  (`AppSettings` in `ipc.ts`, sanitized in `main.ts` `readSettings`). The renderer's
+  `PinnedFolders` (`pinned-folders.ts`) reads it via `SettingsStore.pinned()` on
+  startup and writes through `SettingsStore.setPinned()` on every pin/unpin (which
+  rewrites the whole settings file, preserving the other sections).
+
 ### Settings
 - **Where.** Opened from the gear button (titlebar, top-right) or **File ▸ Settings**;
   both call `PaneManager.openSettings()`, which opens a single **Settings tab** in the
@@ -166,6 +179,7 @@ JSON file (`sessions.json`) in the per-user app data dir — see `electron/sessi
 │   ├── titlebar.ts       # custom window chrome: File▸{Settings,Exit}, gear btn, layout selector, win controls
 │   ├── terminal-tab.ts   # xterm.js wrapper (fit + web-links + WebGL addons; reparent)
 │   ├── folder-tree.ts    # left pane: drive/volume selector + lazy dir tree (fs.drives)
+│   ├── pinned-folders.ts # left pane (bottom): persistent pinned-folder quick-launch list
 │   ├── session-list.ts   # right pane
 │   ├── settings-store.ts # in-memory holder for user settings (loads/saves via window.api.settings)
 │   ├── settings-view.ts  # Settings tab content: left nav + section editors (General, Commands)

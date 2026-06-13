@@ -98,6 +98,9 @@ export interface GeneralSettings {
 export interface AppSettings {
   commands: CommandPreset[];
   general: GeneralSettings;
+  /** Folders the user pinned for quick access, shown in the left pane's "Pinned"
+   *  section. Absolute paths, in pin order. */
+  pinnedFolders: string[];
 }
 
 export const DEFAULT_GENERAL: GeneralSettings = {
@@ -124,6 +127,7 @@ export const DEFAULT_COMMANDS: CommandPreset[] = [
 export const DEFAULT_SETTINGS: AppSettings = {
   commands: DEFAULT_COMMANDS,
   general: DEFAULT_GENERAL,
+  pinnedFolders: [],
 };
 
 /**

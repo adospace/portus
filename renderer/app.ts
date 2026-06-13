@@ -6,6 +6,7 @@ import 'iconify-icon'; // registers the <iconify-icon> web component
 import { addCollection } from 'iconify-icon';
 import lucide from '@iconify-json/lucide/icons.json';
 import { FolderTree } from './folder-tree';
+import { PinnedFolders } from './pinned-folders';
 import { SessionList } from './session-list';
 import { PaneManager } from './pane-manager';
 import { LayoutManager } from './layout';
@@ -33,13 +34,20 @@ const sessionList = new SessionList(
       claudeId: s.claudeId,
       title: s.title,
     }),
+  () => settingsStore.commands(),
+  (folder, command) => void paneManager.createSession(folder, { command }),
+  (folder) => pinnedFolders.pin(folder),
   $<HTMLInputElement>('#session-search'),
 );
 
 const paneManager = new PaneManager({
   onSessionsChanged: () => sessionList.refresh(),
   settings: settingsStore,
-  onActiveFolderChanged: (folder) => void folderTree.highlightFolder(folder),
+  onActiveFolderChanged: (folder) => {
+    void folderTree.highlightFolder(folder);
+    sessionList.setActiveFolder(folder);
+  },
+  onPinFolder: (folder) => pinnedFolders.pin(folder),
 });
 
 // Resolve and apply the theme as early as possible (from the localStorage cache)
@@ -67,6 +75,18 @@ const folderTree = new FolderTree(
   $<HTMLSelectElement>('#drive-select'),
   () => settingsStore.commands(),
   (folder, command) => void paneManager.createSession(folder, { command }),
+  (folder) => pinnedFolders.pin(folder),
+  (folder) => sessionList.setSelectedFolder(folder),
+);
+
+// Bottom of the left pane: pinned folders for quick access. Clicking one opens
+// the command menu to launch a session there; the list persists in settings.
+const pinnedFolders = new PinnedFolders(
+  $('#pinned-panel'),
+  $('#pinned-list'),
+  () => settingsStore.commands(),
+  (folder, command) => void paneManager.createSession(folder, { command }),
+  (folders) => void settingsStore.setPinned(folders),
 );
 
 // --- Outer 3-pane resize ---------------------------------------------------
@@ -120,6 +140,7 @@ async function init(): Promise<void> {
   await settingsStore.load();
   // Apply the persisted (authoritative) theme now that settings are loaded.
   themeManager.set(settingsStore.general().theme);
+  pinnedFolders.setFolders(settingsStore.pinned());
   paneManager.setHomeDir(await window.api.fs.home());
   await folderTree.init();
   await sessionList.refresh();

@@ -42,6 +42,8 @@ export interface PaneManagerOpts {
   /** The active terminal tab's folder changed (null = no terminal tab active),
    *  so the folder tree can highlight the linked directory. */
   onActiveFolderChanged?: (folder: string | null) => void;
+  /** Pin a tab's folder to the left pane's "Pinned" list (tab right-click menu). */
+  onPinFolder?: (folder: string) => void;
 }
 
 export class PaneManager {
@@ -343,7 +345,12 @@ export class PaneManager {
     // and to copy its path; both sit at the top of the menu.
     const tab = pane.get(ptyId);
     if (tab?.kind === 'terminal' && tab.folder) {
-      entries.push(revealAction(tab.folder), copyPathAction(tab.folder), 'separator');
+      const folder = tab.folder;
+      entries.push(revealAction(folder), copyPathAction(folder));
+      if (this.opts.onPinFolder) {
+        entries.push({ icon: 'lucide:pin', label: 'Pin folder', onSelect: () => this.opts.onPinFolder!(folder) });
+      }
+      entries.push('separator');
     }
 
     if (this.panes.length === 1 && this.requestLayout) {

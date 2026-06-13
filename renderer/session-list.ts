@@ -1,12 +1,32 @@
 // Right pane: the list of sessions (live and historical) sourced from the
 // session store. Clicking a row asks the app to restore that session. A search
 // box filters the list by session title, folder name, or full path.
-import { isMeaningfulTitle, type PersistedSession } from '../electron/ipc';
-import { copyPath, copyPathLabel, fileManagerLabel, openInFileManager } from './file-manager';
+import { isMeaningfulTitle, type CommandPreset, type PersistedSession } from '../electron/ipc';
+import { openCommandMenu } from './command-menu';
+import {
+  copyPath,
+  copyPathAction,
+  copyPathLabel,
+  fileManagerLabel,
+  openInFileManager,
+  revealAction,
+} from './file-manager';
 
 function baseName(p: string): string {
   const parts = p.split(/[\\/]/).filter(Boolean);
   return parts[parts.length - 1] ?? p;
+}
+
+/** Normalise a path for comparison: lowercase, forward slashes, no trailing slash. */
+function normPath(p: string): string {
+  let s = p.toLowerCase().replace(/\\/g, '/');
+  if (s.length > 1) s = s.replace(/\/+$/, '');
+  return s;
+}
+
+/** Whether two paths refer to the same folder (null/empty never matches). */
+function samePath(a: string | null, b: string | null): boolean {
+  return !!a && !!b && normPath(a) === normPath(b);
 }
 
 function shortTime(iso: string): string {
@@ -23,16 +43,38 @@ function displayName(s: PersistedSession): string {
 export class SessionList {
   private sessions: PersistedSession[] = [];
   private query = '';
+  /** Folder currently selected in the folder tree → gray edge line on its rows. */
+  private selectedFolder: string | null = null;
+  /** Folder of the active terminal tab → orange edge line on its rows, so every
+   *  session working on the same folder stands out. */
+  private activeFolder: string | null = null;
 
   constructor(
     private readonly container: HTMLElement,
     private readonly onRestore: (session: PersistedSession) => void,
+    private readonly getCommands: () => CommandPreset[],
+    private readonly onRunCommand: (folder: string, command: string) => void,
+    private readonly onPinFolder: (folder: string) => void,
     search?: HTMLInputElement,
   ) {
     search?.addEventListener('input', () => {
       this.query = search.value.trim().toLowerCase();
       this.render();
     });
+  }
+
+  /** Mark rows whose folder matches the tree's selected folder (gray line). */
+  setSelectedFolder(folder: string | null): void {
+    if (samePath(folder, this.selectedFolder) || (!folder && !this.selectedFolder)) return;
+    this.selectedFolder = folder;
+    this.render();
+  }
+
+  /** Mark rows whose folder matches the active tab's folder (orange line). */
+  setActiveFolder(folder: string | null): void {
+    if (samePath(folder, this.activeFolder) || (!folder && !this.activeFolder)) return;
+    this.activeFolder = folder;
+    this.render();
   }
 
   async refresh(): Promise<void> {
@@ -81,6 +123,20 @@ export class SessionList {
     row.className =
       'group relative flex flex-col gap-0.5 px-3 py-2 cursor-pointer hover:bg-edge/60 border-b border-edge/40';
 
+    // Left-edge folder-match indicators (two parallel lanes): a gray line when the
+    // row's folder matches the folder selected in the tree, and an orange line when
+    // it matches the active tab's folder — so same-folder sessions stand out.
+    if (samePath(s.folder, this.selectedFolder)) {
+      const bar = document.createElement('span');
+      bar.className = 'absolute left-0 top-0 bottom-0 w-[2px] bg-muted';
+      row.appendChild(bar);
+    }
+    if (samePath(s.folder, this.activeFolder)) {
+      const bar = document.createElement('span');
+      bar.className = 'absolute left-[3px] top-0 bottom-0 w-[2px] bg-accent';
+      row.appendChild(bar);
+    }
+
     const top = document.createElement('div');
     top.className = 'flex items-center gap-2';
     const name = document.createElement('span');
@@ -98,6 +154,24 @@ export class SessionList {
 
     // Restore on a body click, but not when an action button was the target.
     row.addEventListener('click', () => this.onRestore(s));
+
+    // Right-click → the same menu the folder tree offers for this folder: pin /
+    // reveal / copy on top, with the launch-command list below.
+    row.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      openCommandMenu(
+        e.clientX,
+        e.clientY,
+        this.getCommands(),
+        (cmd) => this.onRunCommand(s.folder, cmd.command),
+        [
+          { icon: 'lucide:pin', label: 'Pin folder', onSelect: () => this.onPinFolder(s.folder) },
+          revealAction(s.folder),
+          copyPathAction(s.folder),
+        ],
+      );
+    });
 
     // Hover actions, pinned top-right over the timestamp.
     const actions = document.createElement('div');

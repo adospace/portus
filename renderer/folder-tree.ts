@@ -37,6 +37,9 @@ export class FolderTree {
     private readonly driveSelect: HTMLSelectElement,
     private readonly getCommands: () => CommandPreset[],
     private readonly onRunCommand: (folder: string, command: string) => void,
+    private readonly onPinFolder: (folder: string) => void,
+    /** A directory row was clicked → became the "selected" folder. */
+    private readonly onSelectFolder: (folder: string) => void,
   ) {
     this.root = container;
     this.driveSelect.addEventListener('change', () => {
@@ -119,6 +122,7 @@ export class FolderTree {
     if (entry.isDirectory) {
       row.addEventListener('click', (e) => {
         e.stopPropagation();
+        this.select(row, entry.path);
         void this.toggle(wrap, chevron, icon);
       });
       row.addEventListener('contextmenu', (e) => {
@@ -162,9 +166,24 @@ export class FolderTree {
     }
   }
 
+  // --- folder selection -------------------------------------------------
+  // Clicking a directory row "selects" it: the row gets a persistent gray tint and
+  // the selected folder is reported so the session list can mark matching rows.
+
+  private selectedRow: HTMLElement | null = null;
+
+  private select(row: HTMLElement, path: string): void {
+    if (this.selectedRow === row) return;
+    this.selectedRow?.classList.remove('bg-edge');
+    this.selectedRow = row;
+    row.classList.add('bg-edge');
+    this.onSelectFolder(path);
+  }
+
   private openMenu(x: number, y: number, folder: string, wrap: HTMLElement): void {
     openCommandMenu(x, y, this.getCommands(), (cmd) => this.onRunCommand(folder, cmd.command), [
       { icon: 'lucide:refresh-cw', label: 'Refresh', onSelect: () => void this.refresh(wrap) },
+      { icon: 'lucide:pin', label: 'Pin folder', onSelect: () => this.onPinFolder(folder) },
       revealAction(folder),
       copyPathAction(folder),
     ]);
