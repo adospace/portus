@@ -9,7 +9,8 @@
 
 <img width="1400" height="900" alt="Screenshot 2026-06-13 112608" src="https://github.com/user-attachments/assets/3095bc7a-8269-4850-b422-fa4eacca0c77" />
 
-<img width="1400" height="900" alt="Screenshot 2026-06-13 112643" src="https://github.com/user-attachments/assets/41c70e48-60d4-4843-9415-933434b8c859" />
+<img width="1400" height="900" alt="Screenshot 2026-06-13 113035" src="https://github.com/user-attachments/assets/ff2a1c8e-bc94-43db-a0be-208cc8ca273b" />
+
 
 ## What is portus?
 
