@@ -3,10 +3,13 @@
 > Mission control for multiple AI agent CLI sessions. Run every agent in one
 > focused, three-pane window and watch them all at a glance.
 
-<img width="1400" height="900" alt="Screenshot 2026-06-12 144524" src="https://github.com/user-attachments/assets/5c1a6a3a-e944-4d1c-988a-6f949dbd86a7" />
+<img width="1400" height="900" alt="Screenshot 2026-06-13 112332" src="https://github.com/user-attachments/assets/e173a08f-b15b-48ad-ba4b-1264d5394626" />
 
-<img width="1400" height="900" alt="image" src="https://github.com/user-attachments/assets/6250fecd-f207-4000-b91f-81ba44273c92" />
+<img width="1400" height="900" alt="Screenshot 2026-06-13 112507" src="https://github.com/user-attachments/assets/7cff1607-31e4-4452-831e-b3650a435ac2" />
 
+<img width="1400" height="900" alt="Screenshot 2026-06-13 112608" src="https://github.com/user-attachments/assets/3095bc7a-8269-4850-b422-fa4eacca0c77" />
+
+<img width="1400" height="900" alt="Screenshot 2026-06-13 112643" src="https://github.com/user-attachments/assets/41c70e48-60d4-4843-9415-933434b8c859" />
 
 ## What is portus?
 
