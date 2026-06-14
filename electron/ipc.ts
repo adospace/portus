@@ -59,14 +59,23 @@ export interface ContextUsage {
 }
 
 /**
- * Git metadata for a folder that is a work tree. `branch` is the current branch
- * (or a short SHA for a detached HEAD); `name` is the repository name (from the
- * `origin` remote when present, else the work-tree's folder name). A non-repo
- * folder yields `null` from `git.info`.
+ * Git metadata for a folder that is (or sits inside) a work tree. `branch` is the
+ * current branch (or a short SHA for a detached HEAD); `name` is the repository
+ * name (from the `origin` remote when present, else the work-tree's folder name);
+ * `changes`/`root` are described on the fields. A non-repo folder yields `null`
+ * from `git.info`.
  */
 export interface GitInfo {
   branch: string;
   name: string;
+  /** Number of changed files in the work tree (staged + unstaged + untracked),
+   *  from `git status --porcelain`. 0 when clean, git is unavailable, or the
+   *  caller didn't request a walk-up resolution (the folder-tree marker path). */
+  changes: number;
+  /** Absolute path of the work-tree root (the folder that owns the resolved
+   *  `.git`). May be an ancestor of the queried folder when `walkUp` is set, so a
+   *  diff can be opened at the repo root even from a subdirectory session. */
+  root: string;
 }
 
 /**

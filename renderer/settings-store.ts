@@ -7,6 +7,7 @@ import {
   type AppSettings,
   type CommandPreset,
   type GeneralSettings,
+  type ThemeChoice,
 } from '../electron/ipc';
 
 export class SettingsStore {
@@ -40,6 +41,18 @@ export class SettingsStore {
   /** Replace and persist just the pinned-folder list (other settings untouched). */
   async setPinned(folders: string[]): Promise<void> {
     this.settings = { ...this.settings, pinnedFolders: folders };
+    await window.api.settings.save(this.settings);
+  }
+
+  /** Persist just the theme choice (other settings untouched). The theme applies
+   *  live and app-wide the moment it changes, so it persists on change too rather
+   *  than waiting for a section Save — otherwise saving another section would
+   *  capture the stale theme from the store and discard the live pick. */
+  async setTheme(theme: ThemeChoice): Promise<void> {
+    this.settings = {
+      ...this.settings,
+      general: { ...this.settings.general, theme },
+    };
     await window.api.settings.save(this.settings);
   }
 

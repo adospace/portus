@@ -41,9 +41,16 @@ export interface Tab {
   totalTokens: number;
   /** Context-window occupancy of the backing session, polled from its transcript. */
   context: ContextUsage | null;
-  /** Current git branch of the session's folder (null = not a repo / unknown),
-   *  shown in the status bar. Polled alongside context. */
+  /** Current git branch of the session's folder, resolved by walking up to the
+   *  nearest ancestor repo (null = not a repo / unknown), shown in the status bar.
+   *  Polled alongside context. */
   branch: string | null;
+  /** Number of changed files in the session's repo (working tree). Shown as a
+   *  clickable badge in the status bar; 0 = clean / unknown. Polled with branch. */
+  changes: number;
+  /** Work-tree root of the session's repo (null = not a repo), used as the cwd
+   *  for the diff tab opened from the change badge. */
+  gitRoot: string | null;
   term: TabContent;
   btn: HTMLButtonElement;
   dot: HTMLElement;

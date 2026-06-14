@@ -4,7 +4,9 @@
 import { app, BrowserWindow, dialog, ipcMain, shell, type IpcMainInvokeEvent } from 'electron';
 import { access, open, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { basename, isAbsolute, join } from 'node:path';
+import { basename, dirname, isAbsolute, join } from 'node:path';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { PtyManager } from './pty-manager.js';
 import { SessionStore } from './session-store.js';
 import {
@@ -101,10 +103,25 @@ function encodeProjectDir(folder: string): string {
   return folder.replace(/[/\\]+$/, '').replace(/[^a-zA-Z0-9]/g, '-');
 }
 
-/** Standard Claude context is 200k; 1M-context variants can't be told apart by
- *  model id, so bump the denominator once occupancy clearly exceeds 200k. */
-function contextLimitFor(tokens: number): number {
-  return tokens > 200_000 ? 1_000_000 : 200_000;
+/** Context-window size (denominator for the gauge) for a transcript's model.
+ *  Most current Claude models ship a 1M-token window as standard — Opus 4.6/4.7/
+ *  4.8, Sonnet 4.6, and Fable/Mythos 5 — while Haiku and the older 4.0/4.1/4.5
+ *  families are 200k (those expose 1M only via an opt-in beta we can't see in the
+ *  transcript). We key off the model id, defaulting unknown ids to 200k, then keep
+ *  the original safety net: if occupancy ever exceeds the assumed limit (an
+ *  undetected 1M variant, or a model newer than this list), bump the denominator
+ *  so the gauge never pins at >100%. */
+function contextLimitFor(tokens: number, model: string): number {
+  const id = model.toLowerCase();
+  const oneMillion =
+    /claude-opus-4-[6-9]/.test(id) || // Opus 4.6+ (and forward)
+    /claude-opus-[5-9]/.test(id) || // future Opus majors
+    /claude-sonnet-4-[6-9]/.test(id) || // Sonnet 4.6+
+    /claude-(fable|mythos)-\d/.test(id) || // Fable / Mythos
+    /\[1m\]|[-_]1m\b/.test(id); // explicit 1M marker, if ever present
+  let limit = oneMillion ? 1_000_000 : 200_000;
+  if (tokens > limit) limit = tokens > 1_000_000 ? 2_000_000 : 1_000_000;
+  return limit;
 }
 
 /** Newest .jsonl transcript for a folder = the live session for that directory.
@@ -165,7 +182,7 @@ async function readContextUsage(folder: string, since?: number): Promise<Context
         (usage.cache_read_input_tokens ?? 0);
       if (tokens <= 0) continue;
       const model = entry.message?.model ?? entry.model ?? '';
-      return { tokens, limit: contextLimitFor(tokens), model };
+      return { tokens, limit: contextLimitFor(tokens, model), model };
     }
     return null;
   } catch {
@@ -177,29 +194,44 @@ async function readContextUsage(folder: string, since?: number): Promise<Context
 
 // --- Git info --------------------------------------------------------------
 // The folder tree marks directories that are git work trees (a small symbol +
-// repo-name tooltip), and the status bar shows the active session's branch. We
-// read both straight from the `.git` metadata rather than spawning `git` — a
-// few small file reads, fast enough to call per visible folder.
+// repo-name tooltip), and the status bar shows the active session's branch +
+// working-tree change count. Branch/name come straight from the `.git` metadata
+// (a few small file reads, fast enough per visible folder); the change count is
+// the one thing that genuinely needs a `git` process, so it's only computed for
+// the session status bar (`walkUp` callers), never the folder-tree marker.
 
-/** Resolve a folder's real gitdir, following the `.git`-as-a-file pointer used
- *  by linked worktrees / submodules. Null if `folder` isn't a git work tree. */
-async function resolveGitDir(folder: string): Promise<string | null> {
-  try {
-    const dotGit = join(folder, '.git');
-    const s = await stat(dotGit);
-    if (s.isDirectory()) return dotGit;
-    // `.git` is a file holding "gitdir: <path>" (linked worktree / submodule).
-    const m = /^gitdir:\s*(.+?)\s*$/m.exec(await readFile(dotGit, 'utf8'));
-    if (!m) return null;
-    return isAbsolute(m[1]!) ? m[1]! : join(folder, m[1]!);
-  } catch {
-    return null; // no .git, unreadable, etc.
+const execFileAsync = promisify(execFile);
+
+/** Resolve a folder's real gitdir + work-tree root, following the `.git`-as-a-file
+ *  pointer used by linked worktrees / submodules. When `walkUp` is set, ancestor
+ *  directories are searched too, so a session started in a repo subfolder still
+ *  finds the repo's branch. Null if no git work tree is found. */
+async function resolveGitDir(
+  folder: string,
+  walkUp: boolean,
+): Promise<{ gitDir: string; root: string } | null> {
+  let dir = folder;
+  for (;;) {
+    try {
+      const dotGit = join(dir, '.git');
+      const s = await stat(dotGit);
+      if (s.isDirectory()) return { gitDir: dotGit, root: dir };
+      // `.git` is a file holding "gitdir: <path>" (linked worktree / submodule).
+      const m = /^gitdir:\s*(.+?)\s*$/m.exec(await readFile(dotGit, 'utf8'));
+      if (m) return { gitDir: isAbsolute(m[1]!) ? m[1]! : join(dir, m[1]!), root: dir };
+    } catch {
+      /* no .git here, unreadable, etc. — try the parent if asked */
+    }
+    if (!walkUp) return null;
+    const parent = dirname(dir);
+    if (parent === dir) return null; // reached the filesystem root
+    dir = parent;
   }
 }
 
 /** Repo name from the `origin` remote in `<gitDir>/config` (last URL segment,
  *  sans `.git`), falling back to the work-tree's folder name. */
-async function repoName(gitDir: string, folder: string): Promise<string> {
+async function repoName(gitDir: string, root: string): Promise<string> {
   try {
     const cfg = await readFile(join(gitDir, 'config'), 'utf8');
     const m = /\[remote "origin"\][^[]*?\n\s*url\s*=\s*(.+?)\s*$/ms.exec(cfg);
@@ -211,20 +243,39 @@ async function repoName(gitDir: string, folder: string): Promise<string> {
   } catch {
     /* no config / no origin — fall through to the folder name */
   }
-  return basename(folder.replace(/[/\\]+$/, '')) || folder;
+  return basename(root.replace(/[/\\]+$/, '')) || root;
 }
 
-/** Git metadata for `folder` (current branch + repo name), or null if it isn't a
- *  git work tree. Reads `.git/HEAD` and `.git/config`; no `git` process. */
-async function readGitInfo(folder: string): Promise<GitInfo | null> {
-  const gitDir = await resolveGitDir(folder);
-  if (!gitDir) return null;
+/** Count changed files in a work tree via `git status --porcelain` (staged,
+ *  unstaged, and untracked). Best-effort: 0 if git is missing or errors out. */
+async function countChanges(root: string): Promise<number> {
+  try {
+    const { stdout } = await execFileAsync('git', ['status', '--porcelain'], {
+      cwd: root,
+      windowsHide: true,
+      maxBuffer: 16 * 1024 * 1024,
+    });
+    return stdout.split('\n').filter((l) => l.trim().length > 0).length;
+  } catch {
+    return 0; // git not installed, not a repo anymore, etc.
+  }
+}
+
+/** Git metadata for `folder` (branch + repo name, plus change count + root when
+ *  `walkUp`), or null if it isn't (and — with `walkUp` — isn't inside) a git work
+ *  tree. Branch/name are read from `.git`; only the walk-up path spawns `git` for
+ *  the change count, so the folder-tree marker stays cheap. */
+async function readGitInfo(folder: string, walkUp: boolean): Promise<GitInfo | null> {
+  const resolved = await resolveGitDir(folder, walkUp);
+  if (!resolved) return null;
+  const { gitDir, root } = resolved;
   try {
     const head = (await readFile(join(gitDir, 'HEAD'), 'utf8')).trim();
     const ref = /^ref:\s*refs\/heads\/(.+)$/.exec(head);
     const branch = ref ? ref[1]! : head.slice(0, 7); // detached HEAD → short SHA
     if (!branch) return null;
-    return { branch, name: await repoName(gitDir, folder) };
+    const changes = walkUp ? await countChanges(root) : 0;
+    return { branch, name: await repoName(gitDir, root), changes, root };
   } catch {
     return null;
   }
@@ -334,8 +385,8 @@ function registerIpc(): void {
       });
   });
 
-  ipcMain.handle(Channels.gitInfo, (_e, folder: string): Promise<GitInfo | null> =>
-    readGitInfo(folder),
+  ipcMain.handle(Channels.gitInfo, (_e, folder: string, walkUp?: boolean): Promise<GitInfo | null> =>
+    readGitInfo(folder, walkUp ?? false),
   );
 
   ipcMain.handle(Channels.contextGet, (_e, folder: string, since?: number): Promise<ContextUsage | null> =>

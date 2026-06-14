@@ -112,9 +112,13 @@ JSON file (`sessions.json`) in the per-user app data dir — see `electron/sessi
   (`~/.claude/projects/<encoded-cwd>/<newest>.jsonl`, mapped by folder via
   `context.get`), takes the latest assistant entry's `usage`, and sums
   `input + cache_creation + cache_read` tokens ≈ current context occupancy. Only a
-  tail of the file is read. Limit defaults to 200k, bumped to 1M when occupancy
-  exceeds 200k (the 1M-context variants aren't distinguishable by model id). The
-  renderer polls every 4s (`PaneManager.refreshContext`). No transcript → no gauge.
+  tail of the file is read. The limit (denominator) is derived from the transcript's
+  model id in `contextLimitFor`: current 1M-window models — Opus 4.6/4.7/4.8,
+  Sonnet 4.6, Fable/Mythos 5 — get 1M; Haiku and the older 4.0/4.1/4.5 families
+  (200k base, 1M only via an opt-in beta we can't see) and unknown ids default to
+  200k, with a safety net that bumps the denominator if occupancy ever exceeds the
+  assumed limit. The renderer polls every 4s (`PaneManager.refreshContext`). No
+  transcript → no gauge.
 - **Freshness.** `context.get(folder, since)` ignores transcripts last modified
   before `since` (the tab's `startedAt`), so a **new** session never inherits a
   prior run's leftover transcript in the same folder — and a plain shell (which

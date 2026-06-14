@@ -51,9 +51,13 @@ const api = {
   },
   git: {
     /** Git metadata for `folder` — current branch (short SHA if detached) + repo
-     *  name — or null if it isn't a repo. Read from `.git`, no `git` process. */
-    info: (folder: string): Promise<GitInfo | null> =>
-      ipcRenderer.invoke(Channels.gitInfo, folder),
+     *  name — or null if it isn't a repo. With `walkUp`, ancestor folders are
+     *  searched too (so a subdir session still resolves a branch) and the
+     *  working-tree change count + repo root are filled in (this path spawns
+     *  `git`); without it, only the immediate folder is checked (the cheap
+     *  folder-tree marker). */
+    info: (folder: string, walkUp?: boolean): Promise<GitInfo | null> =>
+      ipcRenderer.invoke(Channels.gitInfo, folder, walkUp),
   },
   clipboard: {
     // Electron's clipboard module works in the renderer without the permission

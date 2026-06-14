@@ -61,6 +61,8 @@ export class PaneManager {
   private readonly statusEls = new Map<string, HTMLElement>();
   // The status-bar git-branch wrapper (whole segment toggles hidden), resolved once.
   private branchSeg: HTMLElement | null = null;
+  // The status-bar change-count button (toggles hidden; click opens a diff tab).
+  private changesSeg: HTMLButtonElement | null = null;
   // Last folder reported to onActiveFolderChanged; guards against re-notifying on
   // the hot path (status/usage/context repaints all call paintStatusBar).
   private lastNotifiedFolder: string | null = null;
@@ -211,7 +213,7 @@ export class PaneManager {
       persistentId: opts.persistentId ?? ptyId,
       ptyId,
       folder,
-      title: null,
+      title: opts.title ?? null,
       status: 'idle',
       busyStart: null,
       startedAt: Date.now(),
@@ -219,6 +221,8 @@ export class PaneManager {
       totalTokens: 0,
       context: null,
       branch: null,
+      changes: 0,
+      gitRoot: null,
       term,
       btn: document.createElement('button'),
       dot: document.createElement('span'),
@@ -227,9 +231,12 @@ export class PaneManager {
     this.ptyIndex.set(ptyId, pane);
     pane.addTab(tab);
 
-    // Resolve the folder's git branch for the status bar (best-effort, async).
-    void window.api.git.info(folder).then((info) => {
+    // Resolve the folder's git branch + change count for the status bar, walking
+    // up to the nearest ancestor repo (best-effort, async).
+    void window.api.git.info(folder, true).then((info) => {
       tab.branch = info?.branch ?? null;
+      tab.changes = info?.changes ?? 0;
+      tab.gitRoot = info?.root ?? null;
       if (this.isActiveTab(ptyId)) this.paintStatusBar();
     });
 
@@ -312,6 +319,8 @@ export class PaneManager {
       totalTokens: 0,
       context: null,
       branch: null,
+      changes: 0,
+      gitRoot: null,
       term: view,
       btn: document.createElement('button'),
       dot: document.createElement('span'),
@@ -494,6 +503,7 @@ export class PaneManager {
     this.notifyActiveFolder(tab ? tab.folder : null);
     this.setText(this.statusValue('status-folder'), tab ? tab.folder : '—');
     this.paintBranchStatus(tab);
+    this.paintChangesStatus(tab);
     this.paintContextStatus(tab);
     this.setText(
       this.statusValue('status-elapsed'),
@@ -522,11 +532,17 @@ export class PaneManager {
         } catch {
           tab.context = null;
         }
-        // Re-read the branch too, so a checkout in the terminal is reflected.
+        // Re-read the branch + change count too, so a checkout or edits in the
+        // terminal are reflected.
         try {
-          tab.branch = (await window.api.git.info(tab.folder))?.branch ?? null;
+          const info = await window.api.git.info(tab.folder, true);
+          tab.branch = info?.branch ?? null;
+          tab.changes = info?.changes ?? 0;
+          tab.gitRoot = info?.root ?? null;
         } catch {
           tab.branch = null;
+          tab.changes = 0;
+          tab.gitRoot = null;
         }
         pane.paintContext(tab);
       }
@@ -541,6 +557,36 @@ export class PaneManager {
     const branch = tab?.branch ?? null;
     this.branchSeg.hidden = !branch;
     if (branch) this.setText(this.statusValue('status-branch'), branch);
+  }
+
+  /** Status-bar working-tree change count for the active tab: a clickable badge
+   *  (hidden when clean / not a repo) that opens a diff in a new tab. */
+  private paintChangesStatus(tab: Tab | null): void {
+    if (!this.changesSeg) {
+      this.changesSeg = $<HTMLButtonElement>('#status-changes');
+      // Wire the click once; it reads the live active tab at click time so the
+      // diff always targets whatever session is in focus.
+      this.changesSeg.addEventListener('click', () => this.openDiffForActive());
+    }
+    const seg = this.changesSeg;
+    const changes = tab?.branch ? tab.changes : 0;
+    seg.hidden = changes <= 0;
+    if (changes > 0) {
+      this.setText(this.statusValue('status-changes'), String(changes));
+      seg.title = `${changes} working-tree change${changes === 1 ? '' : 's'} — click to view the diff`;
+    }
+  }
+
+  /** Open the active session's working-tree diff in a fresh tab (paged `git diff`),
+   *  rooted at the repo. No-op when the active tab isn't a repo. */
+  private openDiffForActive(): void {
+    const tab = this.active?.activeTab() ?? null;
+    if (!tab || tab.kind !== 'terminal' || !tab.branch) return;
+    const cwd = tab.gitRoot ?? tab.folder;
+    void this.createSession(cwd, {
+      command: 'git diff HEAD',
+      title: `diff: ${tab.branch}`,
+    });
   }
 
   /** Status-bar context segment for the active tab: "63%", tinted at the thresholds. */

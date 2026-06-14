@@ -16,7 +16,7 @@ function readTerminalTheme(): ITheme {
   const v = (name: string, fallback: string): string =>
     s.getPropertyValue(name).trim() || fallback;
   return {
-    background: v('--color-bg', '#0d1117'),
+    background: v('--color-term-bg', '#0d1117'),
     foreground: v('--color-fg', '#e6edf3'),
     cursor: v('--color-accent', '#f78166'),
     selectionBackground: v('--color-selection', '#264f78'),
@@ -44,6 +44,13 @@ export class TerminalTab {
       fontSize: 13,
       cursorBlink: true,
       allowProposedApi: true,
+      // Agent CLIs assume a dark terminal and emit near-white / faint colors for
+      // code-block and diff-context text, which is unreadable on the light theme's
+      // pale background. xterm recolors any cell whose foreground/background pair
+      // falls below this ratio (computed against the cell's *actual* bg, so red/
+      // green diff rows are handled too), pulling that text dark enough to read.
+      // Applied in both themes — it only touches colors that fail the threshold.
+      minimumContrastRatio: 4.5,
       theme: readTerminalTheme(),
     });
 

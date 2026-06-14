@@ -125,7 +125,8 @@ export class SettingsView {
     themeSelect.addEventListener('change', () => {
       const choice = themeSelect.value as ThemeChoice;
       this.general.theme = choice;
-      this.theme?.set(choice); // live preview; persisted on Save
+      this.theme?.set(choice); // applies live, app-wide
+      void this.store.setTheme(choice); // and persists immediately (not Save-gated)
     });
     themeField.appendChild(themeSelect);
 

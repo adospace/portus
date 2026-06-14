@@ -4,6 +4,10 @@
    border-* utilities used across the layout. */
 @theme {
   --color-bg: #0d1117;
+  /* Terminal/session background (read by terminal-tab.ts). Same as --color-bg in
+     dark mode; a softer off-white in light mode so light-colored agent output
+     (e.g. Claude Code's code-change reports) stays legible. */
+  --color-term-bg: #0d1117;
   --color-panel: #11161d;
   --color-edge: #21262d;
   --color-fg: #e6edf3;
@@ -26,6 +30,7 @@
    --color-* variables re-themes every Tailwind utility that references them. */
 :root[data-theme="light"] {
   --color-bg: #ffffff;
+  --color-term-bg: #e6eaef;
   --color-panel: #f6f8fa;
   --color-edge: #d0d7de;
   --color-fg: #1f2328;
@@ -43,6 +48,8 @@
   position: absolute;
   inset: 0;
   padding: 4px 6px;
+  /* Match the terminal's own bg so the padding strip doesn't show a lighter edge. */
+  background: var(--color-term-bg);
 }
 .term-host[hidden] {
   display: none;
