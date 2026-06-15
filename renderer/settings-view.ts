@@ -29,6 +29,8 @@ export class SettingsView {
   /** Working copy of the general settings, edited in place until the user saves. */
   private general: GeneralSettings;
   private activeSection = SECTIONS[0]!.id;
+  /** Index of the command row currently being dragged, or null. */
+  private dragIndex: number | null = null;
 
   constructor(
     parent: HTMLElement,
@@ -297,11 +299,48 @@ export class SettingsView {
 
   private buildCommandRow(cmd: CommandPreset, index: number, rerender: () => void): HTMLElement {
     const row = document.createElement('div');
-    row.className = 'flex items-center gap-2';
+    row.className = 'flex items-center gap-2 rounded';
 
     const inputCls =
       'bg-bg border border-edge rounded px-2 py-1 text-sm text-fg ' +
       'focus:outline-none focus:border-accent';
+
+    // --- drag handle (the only part that initiates a drag) ---
+    const grip = document.createElement('button');
+    grip.className =
+      'shrink-0 flex items-center justify-center w-6 h-8 rounded text-muted ' +
+      'hover:text-fg cursor-grab active:cursor-grabbing';
+    grip.title = 'Drag to reorder';
+    grip.innerHTML = '<iconify-icon icon="lucide:grip-vertical"></iconify-icon>';
+    // Rows are only draggable while the pointer is on the grip, so the text
+    // inputs stay selectable.
+    grip.addEventListener('mousedown', () => (row.draggable = true));
+    const stopDrag = () => (row.draggable = false);
+    grip.addEventListener('mouseup', stopDrag);
+
+    row.addEventListener('dragstart', (e) => {
+      this.dragIndex = index;
+      row.classList.add('opacity-40');
+      if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move';
+    });
+    row.addEventListener('dragend', () => {
+      row.classList.remove('opacity-40');
+      stopDrag();
+    });
+    row.addEventListener('dragover', (e) => {
+      if (this.dragIndex === null || this.dragIndex === index) return;
+      e.preventDefault();
+      if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+    });
+    row.addEventListener('drop', (e) => {
+      e.preventDefault();
+      const from = this.dragIndex;
+      this.dragIndex = null;
+      if (from === null || from === index) return;
+      const [moved] = this.commands.splice(from, 1);
+      if (moved) this.commands.splice(index, 0, moved);
+      rerender();
+    });
 
     const name = document.createElement('input');
     name.className = `${inputCls} w-48 shrink-0`;
@@ -325,7 +364,7 @@ export class SettingsView {
       rerender();
     });
 
-    row.append(name, command, remove);
+    row.append(grip, name, command, remove);
     return row;
   }
 
