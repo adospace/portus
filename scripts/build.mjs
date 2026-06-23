@@ -43,7 +43,22 @@ const builds = [
     format: 'iife',
     target: 'chrome128',
     sourcemap: true,
-    loader: { '.json': 'json' },
+    // '.ttf' (file): Monaco ships a codicon font referenced from its CSS — emit it
+    // next to app.css so the url() resolves on disk.
+    loader: { '.json': 'json', '.ttf': 'file' },
+    logLevel: 'info',
+  },
+  {
+    // Monaco's generic editor web worker. Bundled as a standalone classic worker
+    // script the renderer loads via `new Worker('./editor.worker.js')`. Only this
+    // one worker is shipped (no per-language IntelliSense workers) — highlight-only.
+    entryPoints: [resolve(root, 'node_modules/monaco-editor/esm/vs/editor/editor.worker.js')],
+    outfile: resolve(root, 'dist/renderer/editor.worker.js'),
+    bundle: true,
+    platform: 'browser',
+    format: 'iife',
+    target: 'chrome128',
+    sourcemap: true,
     logLevel: 'info',
   },
 ];

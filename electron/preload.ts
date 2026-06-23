@@ -5,9 +5,12 @@ import { clipboard, contextBridge, ipcRenderer } from 'electron';
 import {
   Channels,
   type AppSettings,
+  type ConfirmSaveChoice,
   type ContextUsage,
   type DirEntry,
   type Drive,
+  type FileRead,
+  type GitFileStatus,
   type GitInfo,
   type PersistedSession,
   type SessionStatus,
@@ -44,10 +47,23 @@ const api = {
     drives: (): Promise<Drive[]> => ipcRenderer.invoke(Channels.fsDrives),
     /** Open a native folder picker; resolves to the chosen path or null if cancelled. */
     pickFolder: (): Promise<string | null> => ipcRenderer.invoke(Channels.fsPickFolder),
+    /** Read a file for the editor: `text` content, or `binary` if it should be
+     *  opened with the OS default handler instead. */
+    readFile: (path: string): Promise<FileRead> => ipcRenderer.invoke(Channels.fsReadFile, path),
+    /** Write UTF-8 `content` to `path` (editor save). */
+    writeFile: (path: string, content: string): Promise<void> =>
+      ipcRenderer.invoke(Channels.fsWriteFile, path, content),
+  },
+  dialog: {
+    /** Native "save changes?" prompt for closing a dirty editor tab. */
+    confirmSave: (name: string): Promise<ConfirmSaveChoice> =>
+      ipcRenderer.invoke(Channels.dialogConfirmSave, name),
   },
   shell: {
     /** Open a path in the OS file manager (Explorer / Finder). */
     openPath: (path: string): Promise<string> => ipcRenderer.invoke(Channels.shellOpenPath, path),
+    /** Move a file/folder to the OS Recycle Bin / Trash (reversible delete). */
+    trashItem: (path: string): Promise<void> => ipcRenderer.invoke(Channels.shellTrashItem, path),
   },
   git: {
     /** Git metadata for `folder` — current branch (short SHA if detached) + repo
@@ -58,6 +74,10 @@ const api = {
      *  folder-tree marker). */
     info: (folder: string, walkUp?: boolean): Promise<GitInfo | null> =>
       ipcRenderer.invoke(Channels.gitInfo, folder, walkUp),
+    /** Working-tree status of every changed path in `folder`'s repo (absolute
+     *  paths), for decorating the folder tree. Empty if not in a repo. */
+    status: (folder: string): Promise<GitFileStatus[]> =>
+      ipcRenderer.invoke(Channels.gitStatus, folder),
   },
   clipboard: {
     // Electron's clipboard module works in the renderer without the permission

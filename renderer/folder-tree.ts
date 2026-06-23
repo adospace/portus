@@ -2,9 +2,10 @@
 // (Windows drive letters, macOS volumes), defaulting to the drive that holds the
 // user's home folder. Directories expand on click and load their children on
 // demand. Right-clicking a directory opens a context menu to start a session there.
-import type { CommandPreset, DirEntry, Drive } from '../electron/ipc';
+import type { CommandPreset, DirEntry, Drive, GitFileStatus } from '../electron/ipc';
 import { openCommandMenu } from './command-menu';
-import { copyPathAction, revealAction } from './file-manager';
+import { openContextMenu } from './context-menu';
+import { copyPathAction, openInFileManager, revealAction, trashLabel } from './file-manager';
 
 // Render an icon into a stable wrapper via the <iconify-icon> web component, so
 // listeners/transforms on the wrapper survive icon changes (e.g. the chevron we
@@ -40,6 +41,8 @@ export class FolderTree {
     private readonly onPinFolder: (folder: string) => void,
     /** A directory row was clicked → became the "selected" folder. */
     private readonly onSelectFolder: (folder: string) => void,
+    /** A file row was double-clicked → open it (editor for text, OS handler else). */
+    private readonly onOpenFile: (path: string) => void,
   ) {
     this.root = container;
     this.driveSelect.addEventListener('change', () => {
@@ -77,6 +80,7 @@ export class FolderTree {
   private makeNode(entry: DirEntry, depth: number): HTMLElement {
     const wrap = document.createElement('div');
     wrap.dataset['path'] = entry.path;
+    wrap.dataset['isdir'] = entry.isDirectory ? '1' : '';
     wrap.style.setProperty('--depth', String(depth));
 
     const row = document.createElement('div');
@@ -130,6 +134,17 @@ export class FolderTree {
         e.stopPropagation();
         this.openMenu(e.clientX, e.clientY, entry.path, wrap);
       });
+    } else {
+      // Files: double-click opens (Monaco for text, OS default handler otherwise).
+      row.addEventListener('dblclick', (e) => {
+        e.stopPropagation();
+        this.onOpenFile(entry.path);
+      });
+      row.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        this.openFileMenu(e.clientX, e.clientY, entry.path, wrap);
+      });
     }
 
     return wrap;
@@ -156,13 +171,52 @@ export class FolderTree {
     const depth = Number(wrap.style.getPropertyValue('--depth') || 0);
     try {
       const entries = await window.api.fs.listDir(path);
-      for (const entry of entries.filter((e) => e.isDirectory)) {
+      for (const entry of entries) {
         const child = this.makeNode(entry, depth + 1);
         child.style.setProperty('--depth', String(depth + 1));
         children.appendChild(child);
       }
     } catch {
       /* permission denied / unreadable — leave empty */
+    }
+    // Decorate the freshly-listed children with their git working-tree status
+    // (best-effort, async — non-repos and clean files get nothing).
+    void this.decorateGitStatus(path, children);
+  }
+
+  // --- git status decoration -------------------------------------------
+  // Files that git reports as changed get a colored name + a one-letter badge
+  // (M/A/U/D/R); directories that contain (or are) changes get a small dot, so
+  // changes are visible without expanding every folder.
+
+  private async decorateGitStatus(path: string, children: HTMLElement): Promise<void> {
+    let statuses: GitFileStatus[];
+    try {
+      statuses = await window.api.git.status(path);
+    } catch {
+      return;
+    }
+    if (!statuses.length) return;
+
+    const byPath = new Map<string, GitFileStatus['status']>();
+    for (const s of statuses) byPath.set(normPath(s.path), s.status);
+
+    for (const childWrap of Array.from(children.children) as HTMLElement[]) {
+      const p = normPath(childWrap.dataset['path'] ?? '');
+      if (!p) continue;
+      const row = childWrap.firstElementChild as HTMLElement;
+      if (childWrap.dataset['isdir'] === '1') {
+        // Direct hit (an untracked directory) or a roll-up (contains a change).
+        let status = byPath.get(p);
+        if (!status) {
+          const base = `${p}/`;
+          if (statuses.some((s) => normPath(s.path).startsWith(base))) status = 'modified';
+        }
+        if (status) markDir(row, status);
+      } else {
+        const status = byPath.get(p);
+        if (status) markFile(row, status);
+      }
     }
   }
 
@@ -187,6 +241,28 @@ export class FolderTree {
       revealAction(folder),
       copyPathAction(folder),
     ]);
+  }
+
+  /** Right-click on a file row: open it in the app, hand it to the OS default
+   *  handler, copy its path, or move it to the OS trash. */
+  private openFileMenu(x: number, y: number, path: string, wrap: HTMLElement): void {
+    openContextMenu(x, y, [
+      { icon: 'lucide:file-pen', label: 'Open', onSelect: () => this.onOpenFile(path) },
+      { icon: 'lucide:external-link', label: 'Open with default app', onSelect: () => openInFileManager(path) },
+      copyPathAction(path),
+      'separator',
+      { icon: 'lucide:trash-2', label: trashLabel(), danger: true, onSelect: () => void this.trashFile(path, wrap) },
+    ]);
+  }
+
+  /** Move a file to the OS Recycle Bin / Trash and drop its node from the tree. */
+  private async trashFile(path: string, wrap: HTMLElement): Promise<void> {
+    try {
+      await window.api.shell.trashItem(path);
+      wrap.remove();
+    } catch {
+      /* couldn't trash (permission / in use) — leave the node in place */
+    }
   }
 
   /** Re-read a directory's children from disk: clears the loaded child nodes and,
@@ -274,6 +350,44 @@ export class FolderTree {
     const icon = row.children[1] as HTMLElement;
     await this.toggle(wrap, chevron, icon);
   }
+}
+
+/** Decoration (text color + badge letter) for each git working-tree status. */
+const STATUS_STYLE: Record<GitFileStatus['status'], { color: string; badge: string; title: string }> = {
+  modified: { color: 'text-warn', badge: 'M', title: 'Modified' },
+  added: { color: 'text-idle', badge: 'A', title: 'Added' },
+  untracked: { color: 'text-idle', badge: 'U', title: 'Untracked' },
+  deleted: { color: 'text-danger', badge: 'D', title: 'Deleted' },
+  renamed: { color: 'text-warn', badge: 'R', title: 'Renamed' },
+  conflict: { color: 'text-danger', badge: '!', title: 'Conflict' },
+};
+
+/** Color a file row's name + icon by its git status and append a letter badge. */
+function markFile(row: HTMLElement, status: GitFileStatus['status']): void {
+  if (row.querySelector('.git-status')) return; // already decorated
+  const style = STATUS_STYLE[status];
+  // row = [chevron, icon, label]
+  const icon = row.children[1] as HTMLElement | undefined;
+  const label = row.children[2] as HTMLElement | undefined;
+  icon?.classList.remove('text-muted');
+  icon?.classList.add(style.color);
+  label?.classList.add(style.color);
+  const badge = document.createElement('span');
+  badge.className = `git-status ml-auto pl-2 shrink-0 text-[11px] font-semibold ${style.color}`;
+  badge.textContent = style.badge;
+  badge.title = `${style.title} (git)`;
+  row.appendChild(badge);
+}
+
+/** Mark a directory row that contains (or is) a change with a small colored dot. */
+function markDir(row: HTMLElement, status: GitFileStatus['status']): void {
+  if (row.querySelector('.git-status-dot')) return;
+  const style = STATUS_STYLE[status];
+  const dot = document.createElement('span');
+  dot.className =
+    `git-status-dot ml-auto shrink-0 w-1.5 h-1.5 rounded-full ${style.color.replace('text-', 'bg-')}`;
+  dot.title = 'Contains changes (git)';
+  row.appendChild(dot);
 }
 
 /** Normalise a path for comparison: lowercase, forward slashes, no trailing slash. */

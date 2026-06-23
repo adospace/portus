@@ -77,6 +77,7 @@ const folderTree = new FolderTree(
   (folder, command) => void paneManager.createSession(folder, { command }),
   (folder) => pinnedFolders.pin(folder),
   (folder) => sessionList.setSelectedFolder(folder),
+  (path) => void paneManager.openFile(path),
 );
 
 // Bottom of the left pane: pinned folders for quick access. Clicking one opens

@@ -24,6 +24,27 @@ export interface DirEntry {
   isDirectory: boolean;
 }
 
+/**
+ * Result of reading a file for the in-app editor. `text` carries decoded UTF-8
+ * content for a text-like file under the size cap; `binary` means the file is
+ * binary (or too large) and should be handed to the OS default handler
+ * (`shell.openPath`) rather than opened in Monaco.
+ */
+export type FileRead =
+  | { kind: 'text'; content: string }
+  | { kind: 'binary' };
+
+/** User's choice in the unsaved-changes prompt shown when closing an editor tab. */
+export type ConfirmSaveChoice = 'save' | 'discard' | 'cancel';
+
+/** Working-tree status of a single path within a git repo, used to decorate the
+ *  folder tree (colored name + letter badge for files, a roll-up dot for dirs). */
+export interface GitFileStatus {
+  /** Absolute path of the changed file (or untracked directory). */
+  path: string;
+  status: 'added' | 'modified' | 'deleted' | 'renamed' | 'untracked' | 'conflict';
+}
+
 /** A mountable filesystem root: a Windows drive letter or a macOS volume. */
 export interface Drive {
   /** Display label, e.g. "C:" on Windows or "Macintosh HD" on macOS. */
@@ -170,8 +191,13 @@ export const Channels = {
   fsHome: 'fs:home',
   fsDrives: 'fs:drives',
   fsPickFolder: 'fs:pickFolder',
+  fsReadFile: 'fs:readFile',
+  fsWriteFile: 'fs:writeFile',
+  dialogConfirmSave: 'dialog:confirmSave',
   shellOpenPath: 'shell:openPath',
+  shellTrashItem: 'shell:trashItem',
   gitInfo: 'git:info',
+  gitStatus: 'git:status',
   contextGet: 'context:get',
   sessionList: 'session:list',
   sessionSave: 'session:save',

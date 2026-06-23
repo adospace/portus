@@ -14,10 +14,13 @@ import {
   DEFAULT_GENERAL,
   DEFAULT_SETTINGS,
   type AppSettings,
+  type ConfirmSaveChoice,
   type ContextUsage,
   type DirEntry,
   type Drive,
+  type FileRead,
   type GeneralSettings,
+  type GitFileStatus,
   type GitInfo,
   type PersistedSession,
   type SpawnRequest,
@@ -76,6 +79,39 @@ async function listDrives(): Promise<Drive[]> {
     /* no /Volumes (non-macOS Unix) — root alone is fine */
   }
   return drives;
+}
+
+// --- File editor I/O ------------------------------------------------------
+// The in-app Monaco editor reads/writes text files directly (no PTY, no
+// session). Files that are binary or above the cap are reported as `binary` so
+// the renderer hands them to the OS default handler instead.
+
+const MAX_TEXT_BYTES = 5 * 1024 * 1024;
+
+/** Read a file for the editor: decoded UTF-8 text when it's a text-like file
+ *  under the size cap, otherwise `binary` (binary content or too large). */
+async function readFileForEditor(path: string): Promise<FileRead> {
+  const s = await stat(path);
+  if (!s.isFile() || s.size > MAX_TEXT_BYTES) return { kind: 'binary' };
+  const buf = await readFile(path);
+  // A NUL byte in the leading chunk is the classic "not a text file" signal.
+  if (buf.subarray(0, Math.min(buf.length, 8192)).includes(0)) return { kind: 'binary' };
+  return { kind: 'text', content: buf.toString('utf8') };
+}
+
+/** Native unsaved-changes prompt shown when an edited editor tab is closed. */
+async function confirmSave(name: string): Promise<ConfirmSaveChoice> {
+  if (!win) return 'cancel';
+  const res = await dialog.showMessageBox(win, {
+    type: 'warning',
+    buttons: ['Save', "Don't Save", 'Cancel'],
+    defaultId: 0,
+    cancelId: 2,
+    noLink: true,
+    message: `Do you want to save the changes you made to ${name}?`,
+    detail: "Your changes will be lost if you don't save them.",
+  });
+  return res.response === 0 ? 'save' : res.response === 1 ? 'discard' : 'cancel';
 }
 
 // --- Context-window gauge -------------------------------------------------
@@ -261,6 +297,58 @@ async function countChanges(root: string): Promise<number> {
   }
 }
 
+/** Categorise a porcelain `XY` status pair into a single decoration class. */
+function categorizeStatus(xy: string): GitFileStatus['status'] {
+  if (xy === '??') return 'untracked';
+  const x = xy[0] ?? ' ';
+  const y = xy[1] ?? ' ';
+  if (x === 'U' || y === 'U' || xy === 'AA' || xy === 'DD') return 'conflict';
+  if (x === 'R' || y === 'R') return 'renamed';
+  if (x === 'A' || y === 'A') return 'added';
+  if (x === 'D' || y === 'D') return 'deleted';
+  return 'modified';
+}
+
+// Per-repo working-tree status, cached briefly so expanding several folders in the
+// same repo in quick succession doesn't spawn `git` once per folder.
+const STATUS_TTL_MS = 1500;
+const statusCache = new Map<string, { at: number; data: GitFileStatus[] }>();
+
+/** Working-tree status of every changed path in `folder`'s repo, as absolute
+ *  paths. Resolves the repo root (walking up) so a subfolder query still covers
+ *  the whole repo; empty when `folder` isn't in a git work tree. */
+async function gitFileStatuses(folder: string): Promise<GitFileStatus[]> {
+  const resolved = await resolveGitDir(folder, true);
+  if (!resolved) return [];
+  const { root } = resolved;
+  const now = Date.now();
+  const cached = statusCache.get(root);
+  if (cached && now - cached.at < STATUS_TTL_MS) return cached.data;
+
+  let data: GitFileStatus[] = [];
+  try {
+    // -z: NUL-separated, no path quoting. A rename emits "<new>\0<old>", so the
+    // entry after a renamed one is its old path and must be skipped.
+    const { stdout } = await execFileAsync('git', ['status', '--porcelain', '-z'], {
+      cwd: root,
+      windowsHide: true,
+      maxBuffer: 16 * 1024 * 1024,
+    });
+    const parts = stdout.split('\0');
+    for (let i = 0; i < parts.length; i++) {
+      const e = parts[i];
+      if (!e || e.length < 3) continue;
+      const status = categorizeStatus(e.slice(0, 2));
+      data.push({ path: join(root, e.slice(3)), status });
+      if (status === 'renamed') i++; // skip the trailing old path
+    }
+  } catch {
+    data = []; // git missing / not a repo anymore
+  }
+  statusCache.set(root, { at: now, data });
+  return data;
+}
+
 /** Git metadata for `folder` (branch + repo name, plus change count + root when
  *  `walkUp`), or null if it isn't (and — with `walkUp` — isn't inside) a git work
  *  tree. Branch/name are read from `.git`; only the walk-up path spawns `git` for
@@ -371,8 +459,20 @@ function registerIpc(): void {
     const res = await dialog.showOpenDialog(win, { properties: ['openDirectory'] });
     return res.canceled || res.filePaths.length === 0 ? null : res.filePaths[0]!;
   });
+  ipcMain.handle(Channels.fsReadFile, (_e, path: string): Promise<FileRead> =>
+    readFileForEditor(path),
+  );
+  ipcMain.handle(Channels.fsWriteFile, async (_e, path: string, content: string): Promise<void> => {
+    await writeFile(path, content, 'utf8');
+  });
+  ipcMain.handle(Channels.dialogConfirmSave, (_e, name: string): Promise<ConfirmSaveChoice> =>
+    confirmSave(name),
+  );
   ipcMain.handle(Channels.shellOpenPath, (_e, path: string): Promise<string> =>
     shell.openPath(path),
+  );
+  ipcMain.handle(Channels.shellTrashItem, (_e, path: string): Promise<void> =>
+    shell.trashItem(path),
   );
   ipcMain.handle(Channels.fsListDir, async (_e, dirPath: string): Promise<DirEntry[]> => {
     const entries = await readdir(dirPath, { withFileTypes: true });
@@ -387,6 +487,10 @@ function registerIpc(): void {
 
   ipcMain.handle(Channels.gitInfo, (_e, folder: string, walkUp?: boolean): Promise<GitInfo | null> =>
     readGitInfo(folder, walkUp ?? false),
+  );
+
+  ipcMain.handle(Channels.gitStatus, (_e, folder: string): Promise<GitFileStatus[]> =>
+    gitFileStatuses(folder),
   );
 
   ipcMain.handle(Channels.contextGet, (_e, folder: string, since?: number): Promise<ContextUsage | null> =>

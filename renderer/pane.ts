@@ -23,7 +23,7 @@ export interface TabContent {
 }
 
 /** What kind of content a tab holds — terminals route PTY events, views don't. */
-export type TabKind = 'terminal' | 'settings';
+export type TabKind = 'terminal' | 'settings' | 'editor';
 
 export interface Tab {
   kind: TabKind;
@@ -292,6 +292,21 @@ export class Pane {
       return;
     }
 
+    // Editor tabs: file icon + file name, plus a dirty dot (●) that the close ×
+    // replaces on hover (VS Code-style). No status dot, no elapsed timer.
+    if (tab.kind === 'editor') {
+      tab.dot.className = 'shrink-0 flex items-center text-muted';
+      setIcon(tab.dot, 'lucide:file-pen');
+      const name = document.createElement('span');
+      name.className = 'tab-name truncate max-w-[20ch]';
+      name.textContent = baseName(tab.folder);
+      name.title = tab.folder;
+      const dirty = document.createElement('span');
+      dirty.className = 'tab-dirty shrink-0 w-2 h-2 rounded-full bg-fg hidden group-hover:hidden';
+      btn.replaceChildren(tab.dot, name, dirty, close);
+      return;
+    }
+
     tab.dot.className = 'shrink-0 flex items-center';
     setIcon(tab.dot, 'lucide:circle');
 
@@ -328,6 +343,13 @@ export class Pane {
     tab.btn.title =
       `Context ${Math.round(pct)}% · ${fmtTokens(c.tokens)} / ${fmtTokens(c.limit)}` +
       (pct >= 80 ? ' · consider /compact or a fresh session' : '');
+  }
+
+  /** Toggle an editor tab's dirty dot (shown when it has unsaved changes). */
+  setDirty(ptyId: string, dirty: boolean): void {
+    const tab = this.tabs.get(ptyId);
+    if (!tab || tab.kind !== 'editor') return;
+    tab.btn.querySelector<HTMLElement>('.tab-dirty')?.classList.toggle('hidden', !dirty);
   }
 
   /** Update a terminal tab's display title (from the agent's terminal title). */

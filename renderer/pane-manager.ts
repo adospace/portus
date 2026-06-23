@@ -6,6 +6,7 @@ import { TerminalTab } from './terminal-tab';
 import { Pane } from './pane';
 import type { Tab } from './pane';
 import { SettingsView } from './settings-view';
+import { EditorView } from './editor-view';
 import { openCommandMenu } from './command-menu';
 import { openContextMenu, type ContextMenuEntry } from './context-menu';
 import { copyPathAction, revealAction } from './file-manager';
@@ -330,13 +331,92 @@ export class PaneManager {
     pane.addTab(tab);
   }
 
+  /** Open a file in a Monaco editor tab (no PTY, no session). Text-like files
+   *  open in-app; binary / oversized files are handed to the OS default handler.
+   *  A file already open anywhere is focused rather than reopened (keyed by path). */
+  async openFile(path: string): Promise<void> {
+    const open = this.ptyIndex.get(path);
+    if (open && open.has(path)) {
+      open.activateTab(path);
+      this.setActivePane(open);
+      return;
+    }
+
+    let res;
+    try {
+      res = await window.api.fs.readFile(path);
+    } catch {
+      return; // unreadable — silently ignore
+    }
+    if (res.kind === 'binary') {
+      void window.api.shell.openPath(path); // launch / open with the OS default app
+      return;
+    }
+
+    const pane = this.active ?? this.panes[0] ?? null;
+    if (!pane) return;
+    this.setActivePane(pane);
+
+    const view = new EditorView(pane.stackEl, path, res.content);
+    const tab: Tab = {
+      kind: 'editor',
+      persistentId: path,
+      ptyId: path,
+      folder: path, // the file path; the tab label uses its base name
+      title: null,
+      status: 'idle',
+      busyStart: null,
+      startedAt: Date.now(),
+      totalCost: 0,
+      totalTokens: 0,
+      context: null,
+      branch: null,
+      changes: 0,
+      gitRoot: null,
+      term: view,
+      btn: document.createElement('button'),
+      dot: document.createElement('span'),
+      elapsedEl: document.createElement('span'),
+    };
+    // Resolve the owning pane at call time so the dirty dot keeps working after
+    // the tab is relocated to another pane.
+    view.onDirtyChange((dirty) => this.ptyIndex.get(path)?.setDirty(path, dirty));
+    this.ptyIndex.set(path, pane);
+    pane.addTab(tab);
+  }
+
   private closeTab(ptyId: string): void {
     const pane = this.ptyIndex.get(ptyId);
     if (!pane) return;
+    const tab = pane.get(ptyId);
+    // Editor tabs prompt to save unsaved changes before closing (async).
+    if (tab?.kind === 'editor') {
+      void this.closeEditorTab(pane, tab);
+      return;
+    }
     // The Settings tab has no backing PTY — don't try to kill one.
-    if (pane.get(ptyId)?.kind === 'terminal') window.api.pty.kill(ptyId);
+    if (tab?.kind === 'terminal') window.api.pty.kill(ptyId);
     this.ptyIndex.delete(ptyId);
     pane.removeTab(ptyId);
+    this.paintStatusBar();
+  }
+
+  /** Close an editor tab, prompting (Save / Don't Save / Cancel) if it's dirty. */
+  private async closeEditorTab(pane: Pane, tab: Tab): Promise<void> {
+    const view = tab.term as EditorView;
+    if (view.isDirty()) {
+      const choice = await window.api.dialog.confirmSave(view.name());
+      if (choice === 'cancel') return;
+      if (choice === 'save') {
+        try {
+          await view.save();
+        } catch {
+          return; // save failed — keep the tab open rather than lose changes
+        }
+      }
+    }
+    this.ptyIndex.delete(tab.ptyId);
+    pane.removeTab(tab.ptyId);
     this.paintStatusBar();
   }
 

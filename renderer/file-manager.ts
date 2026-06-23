@@ -36,3 +36,8 @@ export function copyPathAction(folder: string): { icon: string; label: string; o
 export function copyPath(folder: string): void {
   window.api.clipboard.writeText(folder);
 }
+
+/** Platform-appropriate label for the "move to OS trash" action. */
+export function trashLabel(): string {
+  return window.api.platform === 'win32' ? 'Move to Recycle Bin' : 'Move to Trash';
+}
