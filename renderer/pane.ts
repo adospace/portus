@@ -192,8 +192,7 @@ export class Pane {
       const isActive = id === ptyId;
       if (isActive) tab.term.show();
       else tab.term.hide();
-      tab.btn.classList.toggle('bg-edge', isActive);
-      tab.btn.classList.toggle('border-edge', isActive);
+      tab.btn.classList.toggle('tab-active', isActive);
     }
     const tab = this.tabs.get(ptyId);
     if (tab) this.fitTab(tab);

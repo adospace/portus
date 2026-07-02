@@ -10,6 +10,9 @@
   --color-term-bg: #0d1117;
   --color-panel: #11161d;
   --color-edge: #21262d;
+  /* Active tab fill — distinctly lighter than panel/edge so the selected tab
+     reads clearly (the two shades above are too close to tell apart). */
+  --color-tab-active: #2d333b;
   --color-fg: #e6edf3;
   --color-muted: #7d8590;
   --color-accent: #f78166;
@@ -33,6 +36,7 @@
   --color-term-bg: #e6eaef;
   --color-panel: #f6f8fa;
   --color-edge: #d0d7de;
+  --color-tab-active: #ffffff;
   --color-fg: #1f2328;
   --color-muted: #656d76;
   --color-accent: #bc4c2e;
@@ -107,6 +111,15 @@ body.resizing .term-host {
 }
 .pane-active {
   box-shadow: inset 0 0 0 1px var(--color-accent);
+}
+
+/* Active tab in a pane's tab bar: a brighter fill plus an accent underline, so the
+   focused session is unmistakable against the near-identical panel/edge shades
+   (the bg difference alone was too subtle to read in dark mode). */
+.tab-active {
+  background: var(--color-tab-active);
+  border-color: var(--color-edge);
+  box-shadow: inset 0 -2px 0 0 var(--color-accent);
 }
 
 /* Pulsing dot for the "busy" tab indicator. */

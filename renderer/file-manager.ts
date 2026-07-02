@@ -28,9 +28,16 @@ export function openInFileManager(folder: string): void {
 /** Label for the "copy folder path to clipboard" action. */
 export const copyPathLabel = 'Copy folder path';
 
-/** A ready-made context-menu action entry for copying `folder` to the clipboard. */
-export function copyPathAction(folder: string): { icon: string; label: string; onSelect: () => void } {
-  return { icon: COPY_ICON, label: copyPathLabel, onSelect: () => copyPath(folder) };
+/** Label for the file variant of the copy-path action (right-clicking a file row). */
+export const copyFilePathLabel = 'Copy file path';
+
+/** A ready-made context-menu action entry for copying `target` to the clipboard.
+ *  Pass `copyFilePathLabel` for file rows so the menu reads "Copy file path". */
+export function copyPathAction(
+  target: string,
+  label: string = copyPathLabel,
+): { icon: string; label: string; onSelect: () => void } {
+  return { icon: COPY_ICON, label, onSelect: () => copyPath(target) };
 }
 
 export function copyPath(folder: string): void {

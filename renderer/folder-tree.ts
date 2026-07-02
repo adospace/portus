@@ -5,7 +5,7 @@
 import type { CommandPreset, DirEntry, Drive, GitFileStatus } from '../electron/ipc';
 import { openCommandMenu } from './command-menu';
 import { openContextMenu } from './context-menu';
-import { copyPathAction, openInFileManager, revealAction, trashLabel } from './file-manager';
+import { copyFilePathLabel, copyPathAction, openInFileManager, revealAction, trashLabel } from './file-manager';
 
 // Render an icon into a stable wrapper via the <iconify-icon> web component, so
 // listeners/transforms on the wrapper survive icon changes (e.g. the chevron we
@@ -64,6 +64,9 @@ export class FolderTree {
     const start = pickDefaultDrive(drives, home);
     if (start) this.driveSelect.value = start.path;
     await this.setRoot(start ? start.path : home);
+
+    // Keep the tree in sync with disk + git so the user never needs "Refresh".
+    this.startGitWatch();
   }
 
   /** Re-root the tree at the given path and auto-expand its first level. */
@@ -194,13 +197,14 @@ export class FolderTree {
     try {
       statuses = await window.api.git.status(path);
     } catch {
-      return;
+      return; // git unavailable / not a repo — never decorated, nothing to clear
     }
-    if (!statuses.length) return;
 
     const byPath = new Map<string, GitFileStatus['status']>();
     for (const s of statuses) byPath.set(normPath(s.path), s.status);
 
+    // Re-apply from a clean slate every call so the live poll can *remove* a badge
+    // when a file's change was committed/stashed (not just add new ones).
     for (const childWrap of Array.from(children.children) as HTMLElement[]) {
       const p = normPath(childWrap.dataset['path'] ?? '');
       if (!p) continue;
@@ -212,12 +216,98 @@ export class FolderTree {
           const base = `${p}/`;
           if (statuses.some((s) => normPath(s.path).startsWith(base))) status = 'modified';
         }
+        clearDirDecoration(row);
         if (status) markDir(row, status);
       } else {
+        clearFileDecoration(row);
         const status = byPath.get(p);
         if (status) markFile(row, status);
       }
     }
+  }
+
+  // --- live git/disk polling -------------------------------------------
+  // A background sweep keeps the tree in sync with disk + git so the user never
+  // has to hit "Refresh": every expanded directory is re-listed (new files
+  // appear, deleted ones drop out) and re-decorated with current git status.
+
+  private pollTimer: number | null = null;
+  private polling = false;
+
+  /** Start the background sync loop (idempotent). */
+  startGitWatch(): void {
+    if (this.pollTimer !== null) return;
+    this.pollTimer = window.setInterval(() => void this.poll(), POLL_INTERVAL_MS);
+  }
+
+  private async poll(): Promise<void> {
+    if (this.polling) return; // a slow previous sweep is still running — skip this tick
+    this.polling = true;
+    try {
+      const dirs: HTMLElement[] = [];
+      this.collectExpanded(this.root, dirs);
+      for (const wrap of dirs) await this.syncDir(wrap);
+    } finally {
+      this.polling = false;
+    }
+  }
+
+  /** Collect every currently-expanded directory wrapper under `container`. */
+  private collectExpanded(container: HTMLElement, out: HTMLElement[]): void {
+    for (const wrap of Array.from(container.children) as HTMLElement[]) {
+      if (wrap.dataset['isdir'] !== '1') continue;
+      const kids = wrap.lastElementChild as HTMLElement | null;
+      if (!kids || kids.hidden) continue;
+      out.push(wrap);
+      this.collectExpanded(kids, out);
+    }
+  }
+
+  /** Reconcile one expanded directory's child nodes with disk (add new entries,
+   *  drop vanished ones) and re-apply git decorations — preserving existing nodes
+   *  (and their expanded subtrees), the current selection, and scroll position. */
+  private async syncDir(wrap: HTMLElement): Promise<void> {
+    const path = wrap.dataset['path'];
+    if (!path) return;
+    const kids = wrap.lastElementChild as HTMLElement | null;
+    if (!kids || kids.hidden) return; // collapsed since it was collected
+
+    let entries: DirEntry[];
+    try {
+      entries = await window.api.fs.listDir(path);
+    } catch {
+      return; // unreadable now — leave the loaded nodes in place
+    }
+
+    const depth = Number(wrap.style.getPropertyValue('--depth') || 0);
+    const existing = new Map<string, HTMLElement>();
+    for (const c of Array.from(kids.children) as HTMLElement[]) {
+      existing.set(normPath(c.dataset['path'] ?? ''), c);
+    }
+
+    // Walk disk order, inserting a node for each new entry in place while leaving
+    // existing nodes (and any expanded subtrees beneath them) untouched.
+    const wanted = new Set<string>();
+    let prev: HTMLElement | null = null;
+    for (const entry of entries) {
+      const key = normPath(entry.path);
+      wanted.add(key);
+      let node = existing.get(key);
+      if (!node) {
+        node = this.makeNode(entry, depth + 1);
+        node.style.setProperty('--depth', String(depth + 1));
+        if (prev) prev.after(node);
+        else kids.prepend(node);
+      }
+      prev = node;
+    }
+
+    // Drop nodes whose files/folders no longer exist on disk.
+    for (const [key, node] of existing) {
+      if (!wanted.has(key)) node.remove();
+    }
+
+    await this.decorateGitStatus(path, kids);
   }
 
   // --- folder selection -------------------------------------------------
@@ -249,7 +339,7 @@ export class FolderTree {
     openContextMenu(x, y, [
       { icon: 'lucide:file-pen', label: 'Open', onSelect: () => this.onOpenFile(path) },
       { icon: 'lucide:external-link', label: 'Open with default app', onSelect: () => openInFileManager(path) },
-      copyPathAction(path),
+      copyPathAction(path, copyFilePathLabel),
       'separator',
       { icon: 'lucide:trash-2', label: trashLabel(), danger: true, onSelect: () => void this.trashFile(path, wrap) },
     ]);
@@ -352,6 +442,9 @@ export class FolderTree {
   }
 }
 
+/** How often the background sweep re-lists expanded dirs + re-reads git status. */
+const POLL_INTERVAL_MS = 4000;
+
 /** Decoration (text color + badge letter) for each git working-tree status. */
 const STATUS_STYLE: Record<GitFileStatus['status'], { color: string; badge: string; title: string }> = {
   modified: { color: 'text-warn', badge: 'M', title: 'Modified' },
@@ -361,6 +454,27 @@ const STATUS_STYLE: Record<GitFileStatus['status'], { color: string; badge: stri
   renamed: { color: 'text-warn', badge: 'R', title: 'Renamed' },
   conflict: { color: 'text-danger', badge: '!', title: 'Conflict' },
 };
+
+/** Every color a git status can paint, for resetting a row before re-decorating. */
+const STATUS_COLORS = Array.from(new Set(Object.values(STATUS_STYLE).map((s) => s.color)));
+
+/** Strip any git decoration from a file row, restoring its base (muted) look.
+ *  Files are never part of the active-folder accent chain, so re-muting is safe. */
+function clearFileDecoration(row: HTMLElement): void {
+  const icon = row.children[1] as HTMLElement | undefined;
+  const label = row.children[2] as HTMLElement | undefined;
+  for (const c of STATUS_COLORS) {
+    icon?.classList.remove(c);
+    label?.classList.remove(c);
+  }
+  icon?.classList.add('text-muted');
+  row.querySelector('.git-status')?.remove();
+}
+
+/** Remove the roll-up "contains changes" dot from a directory row. */
+function clearDirDecoration(row: HTMLElement): void {
+  row.querySelector('.git-status-dot')?.remove();
+}
 
 /** Color a file row's name + icon by its git status and append a letter badge. */
 function markFile(row: HTMLElement, status: GitFileStatus['status']): void {
