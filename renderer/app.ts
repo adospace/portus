@@ -58,9 +58,25 @@ paneManager.setThemeManager(themeManager);
 
 const layout = new LayoutManager($('#layout-grid'), paneManager);
 
+// Show/hide the right-hand Sessions pane. Collapsing the grid columns (rather
+// than only hiding the elements) is what actually hands the space to the center
+// pane; --col-right is left alone so the user's width returns on re-show. The
+// aside and its splitter are hidden too, so nothing paints into the 0px track.
+function applySessionsVisible(visible: boolean): void {
+  const shell = $('#shell');
+  shell.classList.toggle('sessions-hidden', !visible);
+  (shell.lastElementChild as HTMLElement).hidden = !visible;
+  shell.querySelector<HTMLElement>('[data-gutter="right"]')!.hidden = !visible;
+  paneManager.refitAll(); // the center pane just changed width
+}
+
 const titleBar = new TitleBar(
   (mode) => layout.setMode(mode),
   () => paneManager.openSettings(),
+  (visible) => {
+    applySessionsVisible(visible);
+    void settingsStore.setShowSessions(visible);
+  },
 );
 
 // Let the pane manager drive layout changes (e.g. "move tab to a new group"),
@@ -124,13 +140,10 @@ function installOuterSplitters(): void {
 // --- Main-process event routing -------------------------------------------
 function wireEvents(): void {
   window.api.pty.onData((id, data) => paneManager.routeData(id, data));
-  window.api.pty.onStatus((id, status) => paneManager.routeStatus(id, status));
+  window.api.pty.onTitle((id, title) => paneManager.routeTitle(id, title));
   window.api.pty.onUsage((id, tIn, tOut) => paneManager.routeUsage(id, tIn, tOut));
   window.api.pty.onExit((id) => paneManager.routeExit(id));
 }
-
-// Tick the elapsed timers for busy tabs.
-setInterval(() => paneManager.tickElapsed(), 250);
 
 // Poll each session's context-window fill (cheap transcript tail reads).
 setInterval(() => void paneManager.refreshContext(), 4000);
@@ -141,6 +154,9 @@ async function init(): Promise<void> {
   await settingsStore.load();
   // Apply the persisted (authoritative) theme now that settings are loaded.
   themeManager.set(settingsStore.general().theme);
+  const showSessions = settingsStore.general().showSessions;
+  titleBar.setSessionsVisible(showSessions);
+  applySessionsVisible(showSessions);
   pinnedFolders.setFolders(settingsStore.pinned());
   paneManager.setHomeDir(await window.api.fs.home());
   await folderTree.init();

@@ -1,17 +1,14 @@
 // Owns the lifecycle of node-pty processes: one per terminal tab. Spawns the
-// platform shell in a target folder, launches the agent CLI, and infers a
-// coarse busy/idle status by watching the cadence of output.
+// platform shell in a target folder, launches the agent CLI, forwards output to
+// the renderer, and extracts the window title the agent publishes via OSC.
 import * as os from 'node:os';
 import * as pty from 'node-pty';
 import { randomUUID } from 'node:crypto';
-import type { SessionStatus, SpawnRequest } from './ipc.js';
-
-/** Quiet period (ms) after the last output byte before a session is "idle". */
-const IDLE_AFTER_MS = 700;
+import type { SpawnRequest } from './ipc.js';
 
 interface Listeners {
   onData: (ptyId: string, data: string) => void;
-  onStatus: (ptyId: string, status: SessionStatus) => void;
+  onTitle: (ptyId: string, title: string) => void;
   onUsage: (ptyId: string, tokensIn: number, tokensOut: number) => void;
   onExit: (ptyId: string, exitCode: number) => void;
 }
@@ -20,16 +17,17 @@ interface Session {
   id: string;
   proc: pty.IPty;
   folder: string;
-  status: SessionStatus;
-  idleTimer: NodeJS.Timeout | null;
-  sawOutput: boolean;
   // Output coalescing: PTY output (incl. each keystroke's prompt redraw) often
   // arrives as a burst of small chunks. Buffer them and flush once per event-loop
-  // turn so the renderer gets one IPC message + one render + one busy-detection
-  // pass per burst instead of per chunk — which keeps the renderer thread free to
-  // dispatch the user's next keystroke.
+  // turn so the renderer gets one IPC message + one render pass per burst instead
+  // of per chunk — which keeps the renderer thread free to dispatch the user's
+  // next keystroke.
   pending: string[];
   flushScheduled: boolean;
+  /** Tail of a title sequence that was cut in half by a chunk boundary. */
+  titleCarry: string;
+  /** Last title reported to the renderer — repeats are dropped. */
+  lastTitle: string | null;
 }
 
 function defaultShell(): string {
@@ -47,6 +45,45 @@ function parseUsage(chunk: string): { tokensIn: number; tokensOut: number } | nu
   if (!m) return null;
   const toNum = (s: string) => Number(s.replace(/,/g, ''));
   return { tokensIn: toNum(m[1]!), tokensOut: toNum(m[2]!) };
+}
+
+// --- Window title (OSC) ----------------------------------------------------
+// Agent CLIs publish their current state through the terminal's window title:
+// `ESC ] 0 ; <text> BEL` (or OSC 2, or terminated by ST = `ESC \`). Claude Code
+// animates a small glyph in there while it's working, which is the liveliest
+// signal a tab has. Parsing it here — off the raw PTY stream — means a tab's
+// label tracks the agent regardless of whether its terminal is on screen.
+
+/** OSC 0/2 window-title sequence, terminated by BEL or ST. */
+const OSC_TITLE_RE = /\x1b\][02];([^\x07\x1b]*)(?:\x07|\x1b\\)/g;
+/** A trailing, still-unterminated OSC 0/2 introducer worth carrying over. */
+const OSC_TITLE_PARTIAL_RE = /^\x1b\][02]?;?[^\x07\x1b]*$/;
+/** Cap on the carried-over fragment, so a stray `ESC ]` can't grow unbounded. */
+const TITLE_CARRY_MAX = 1024;
+
+/**
+ * Pull the most recent window title out of a chunk, carrying an incomplete
+ * sequence over to the next one. Only the last title in the chunk matters — the
+ * intermediate frames of an animation collapse into the one the terminal would
+ * end up showing.
+ */
+function takeTitle(session: Session, data: string): string | null {
+  const buf = session.titleCarry ? session.titleCarry + data : data;
+  let title: string | null = null;
+  let consumed = 0;
+  OSC_TITLE_RE.lastIndex = 0;
+  for (let m = OSC_TITLE_RE.exec(buf); m; m = OSC_TITLE_RE.exec(buf)) {
+    title = m[1]!;
+    consumed = OSC_TITLE_RE.lastIndex;
+  }
+  const rest = buf.slice(consumed);
+  const start = rest.lastIndexOf('\x1b]');
+  const tail = start >= 0 ? rest.slice(start) : '';
+  session.titleCarry =
+    tail.length > 0 && tail.length <= TITLE_CARRY_MAX && OSC_TITLE_PARTIAL_RE.test(tail)
+      ? tail
+      : '';
+  return title;
 }
 
 export class PtyManager {
@@ -68,18 +105,16 @@ export class PtyManager {
       id,
       proc,
       folder: req.folder,
-      status: 'idle',
-      idleTimer: null,
-      sawOutput: false,
       pending: [],
       flushScheduled: false,
+      titleCarry: '',
+      lastTitle: null,
     };
     this.sessions.set(id, session);
 
     proc.onData((data) => this.handleData(session, data));
     proc.onExit(({ exitCode }) => {
       this.flush(session); // drain any buffered output before the tab goes away
-      this.clearIdleTimer(session);
       this.sessions.delete(id);
       this.listeners.onExit(id, exitCode);
     });
@@ -106,7 +141,6 @@ export class PtyManager {
   kill(id: string): void {
     const s = this.sessions.get(id);
     if (!s) return;
-    this.clearIdleTimer(s);
     s.proc.kill();
     this.sessions.delete(id);
   }
@@ -132,29 +166,14 @@ export class PtyManager {
     session.pending.length = 0;
 
     this.listeners.onData(session.id, data);
-    session.sawOutput = true;
 
     const usage = parseUsage(data);
     if (usage) this.listeners.onUsage(session.id, usage.tokensIn, usage.tokensOut);
 
-    this.setStatus(session, 'busy');
-    this.clearIdleTimer(session);
-    session.idleTimer = setTimeout(() => {
-      // No output for a while → the agent has handed control back to the prompt.
-      this.setStatus(session, 'idle');
-    }, IDLE_AFTER_MS);
-  }
-
-  private setStatus(session: Session, status: SessionStatus): void {
-    if (session.status === status) return;
-    session.status = status;
-    this.listeners.onStatus(session.id, status);
-  }
-
-  private clearIdleTimer(session: Session): void {
-    if (session.idleTimer) {
-      clearTimeout(session.idleTimer);
-      session.idleTimer = null;
+    const title = takeTitle(session, data);
+    if (title !== null && title !== session.lastTitle) {
+      session.lastTitle = title;
+      this.listeners.onTitle(session.id, title);
     }
   }
 }

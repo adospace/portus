@@ -1,8 +1,8 @@
 // Custom window chrome (VS Code-style). Owns the title bar's interactive bits:
-// the File ▸ Exit menu, the single/quad/six layout selector, and the
-// minimize/maximize/close window controls. macOS keeps its native traffic
-// lights, so the custom window controls are hidden there and the bar is padded
-// to clear the inset buttons.
+// the File ▸ Exit menu, the Sessions-pane toggle, the single/quad/six layout
+// selector, and the minimize/maximize/close window controls. macOS keeps its
+// native traffic lights, so the custom window controls are hidden there and the
+// bar is padded to clear the inset buttons.
 import type { LayoutMode } from './layout';
 
 // Render an icon into a stable wrapper via the <iconify-icon> web component, so
@@ -14,10 +14,13 @@ function setIcon(wrapper: HTMLElement, icon: string): void {
 export class TitleBar {
   private menu: HTMLElement | null = null;
   private readonly layoutBtns: HTMLButtonElement[];
+  private readonly sessionsBtn: HTMLButtonElement | null;
+  private sessionsVisible = true;
 
   constructor(
     private readonly onLayoutChange: (mode: LayoutMode) => void,
     private readonly onOpenSettings: () => void,
+    private readonly onToggleSessions: (visible: boolean) => void,
   ) {
     const isMac = window.api.platform === 'darwin';
 
@@ -56,6 +59,13 @@ export class TitleBar {
     });
     document.addEventListener('click', () => this.closeMenu());
 
+    // Sessions-pane toggle (sits just left of the layout selector).
+    this.sessionsBtn = document.querySelector<HTMLButtonElement>('#toggle-sessions');
+    this.sessionsBtn?.addEventListener('click', () => {
+      this.setSessionsVisible(!this.sessionsVisible);
+      this.onToggleSessions(this.sessionsVisible);
+    });
+
     // Layout selector.
     this.layoutBtns = [...document.querySelectorAll<HTMLButtonElement>('#layout-select .layout-btn')];
     for (const btn of this.layoutBtns) {
@@ -66,6 +76,20 @@ export class TitleBar {
       });
     }
     this.setActive('single');
+    // The pane is visible in the markup; init() corrects this once settings load.
+    this.setSessionsVisible(true);
+  }
+
+  /** Set the toggle's state + button highlight WITHOUT firing the callback —
+   *  used to restore the persisted choice at startup. */
+  setSessionsVisible(visible: boolean): void {
+    this.sessionsVisible = visible;
+    const btn = this.sessionsBtn;
+    if (!btn) return;
+    btn.classList.toggle('bg-edge', visible);
+    btn.classList.toggle('text-fg', visible);
+    btn.classList.toggle('text-muted', !visible);
+    btn.title = visible ? 'Hide sessions pane' : 'Show sessions pane';
   }
 
   /** Highlight the layout button matching the active mode. */

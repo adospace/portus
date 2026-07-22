@@ -2,8 +2,6 @@
 // and the renderer. Keeping the channel names and payload shapes in one place
 // avoids drift between the three layers.
 
-export type SessionStatus = 'busy' | 'idle' | 'done';
-
 export interface PersistedSession {
   id: string;
   folder: string;
@@ -122,6 +120,10 @@ export interface GeneralSettings {
   defaultFolder: string;
   sessionRetentionDays: number;
   theme: ThemeChoice;
+  /** Whether the right-hand Sessions pane is shown. Toggled from the title bar
+   *  (not the Settings UI) and remembered across restarts — session history is a
+   *  look-it-up-when-you-need-it pane, not something to keep on screen. */
+  showSessions: boolean;
 }
 
 /** User-editable application settings, persisted as JSON in the user data dir. */
@@ -137,6 +139,7 @@ export const DEFAULT_GENERAL: GeneralSettings = {
   defaultFolder: '',
   sessionRetentionDays: 30,
   theme: 'system',
+  showSessions: true,
 };
 
 /**
@@ -184,7 +187,7 @@ export const Channels = {
   ptyResize: 'pty:resize',
   ptyKill: 'pty:kill',
   ptyData: 'pty:data',
-  ptyStatus: 'pty:status',
+  ptyTitle: 'pty:title',
   ptyUsage: 'pty:usage',
   ptyExit: 'pty:exit',
   fsListDir: 'fs:listDir',

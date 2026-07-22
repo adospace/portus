@@ -28,9 +28,10 @@ long-running agent terminals — and gets out of the way.
 - **Many agents, one window.** Each session is a tab with its own real PTY (a true
   shell + agent CLI, not a fake terminal), so anything that works in your terminal
   works here.
-- **At-a-glance status.** Every tab shows whether its agent is *busy* (●, pulsing),
-  *idle* (◌), or *done* (✓), plus a live elapsed timer while it's working — so you
-  know which sessions need attention without clicking into them.
+- **At-a-glance status, straight from the agent.** A tab is labelled with the title
+  its agent publishes — including the glyph Claude Code animates while it's thinking —
+  so you can see which sessions are working without clicking into them. The app adds
+  no indicator of its own, and background tabs update exactly like the focused one.
 - **Start sessions where the work is.** The left pane is a lazy folder tree rooted
   at a drive/volume you pick; right-click any directory to launch an agent there or
   open it in your OS file manager. Switching tabs highlights the active session's
@@ -43,7 +44,9 @@ long-running agent terminals — and gets out of the way.
 - **Searchable session history.** The right pane lists every session by the title the
   agent CLI generates for its task (falling back to the folder name) plus the working
   path; a search box filters by title, name, or path, and one click restores a session.
-  Hover a row to open its folder in the file manager or delete it from history.
+  Hover a row to open its folder in the file manager or delete it from history. The
+  pane is there when you want it and gone when you don't — the ⏱ button in the title
+  bar collapses it and hands the space to your terminals; the choice is remembered.
 - **Flexible layouts.** Split the center into 1, 4 (2×2), or 6 (3×2) panes, each its
   own tab group, and drag the gutters to resize. Right-click a tab to relocate it
   between panes, open its folder, or close it.
@@ -54,7 +57,7 @@ long-running agent terminals — and gets out of the way.
 ```
 ┌─────────────┬──────────────────────────────┬─────────────────┐
 │ Folder Tree │        Terminal Tabs          │ Session History │
-│             │  [● proj-a] [◌ proj-b] [+]   │                 │
+│             │  [✳ proj-a] [proj-b] [+]     │                 │
 │  ~/dev      │ ┌──────────────────────────┐ │ proj-a  14:32   │
 │  ├ proj-a   │ │                          │ │ proj-b  13:10   │
 │  ├ proj-b   │ │   xterm.js canvas        │ │ ...             │

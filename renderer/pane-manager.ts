@@ -18,22 +18,17 @@ import { isMeaningfulTitle } from '../electron/ipc';
 /** Synthetic, app-wide id for the single Settings tab (it has no PTY). */
 const SETTINGS_ID = 'settings';
 
-/** Don't surface a tab's elapsed timer until it's been busy this long — avoids a
- *  flash of "00:00" when switching tabs briefly marks a session busy. */
-const ELAPSED_MIN_MS = 1500;
+/** How long to sit on a title change before writing it to the session store.
+ *  Agent CLIs animate their title several times a second while they work; the
+ *  tab label follows every frame (free), but persistence must not — each save
+ *  rewrites sessions.json and rebuilds the history pane. */
+const TITLE_PERSIST_MS = 3000;
 
 const $ = <T extends HTMLElement>(sel: string): T => {
   const el = document.querySelector<T>(sel);
   if (!el) throw new Error(`missing element: ${sel}`);
   return el;
 };
-
-function fmtElapsed(ms: number): string {
-  const s = Math.floor(ms / 1000);
-  const mm = String(Math.floor(s / 60)).padStart(2, '0');
-  const ss = String(s % 60).padStart(2, '0');
-  return `${mm}:${ss}`;
-}
 
 export interface PaneManagerOpts {
   /** Called after sessions are created/updated so the history pane refreshes. */
@@ -69,6 +64,8 @@ export class PaneManager {
   private lastNotifiedFolder: string | null = null;
   // Set by app.ts once both exist; the Settings tab's theme selector drives it.
   private themeManager: ThemeManager | null = null;
+  // Pending (throttled) title writes, keyed by ptyId — see TITLE_PERSIST_MS.
+  private readonly titleSaves = new Map<string, ReturnType<typeof setTimeout>>();
 
   constructor(private readonly opts: PaneManagerOpts) {}
 
@@ -215,8 +212,7 @@ export class PaneManager {
       ptyId,
       folder,
       title: opts.title ?? null,
-      status: 'idle',
-      busyStart: null,
+      claudeId: opts.claudeId ?? null,
       startedAt: Date.now(),
       totalCost: 0,
       totalTokens: 0,
@@ -226,8 +222,8 @@ export class PaneManager {
       gitRoot: null,
       term,
       btn: document.createElement('button'),
-      dot: document.createElement('span'),
-      elapsedEl: document.createElement('span'),
+      icon: document.createElement('span'),
+      exited: false,
     };
     this.ptyIndex.set(ptyId, pane);
     pane.addTab(tab);
@@ -239,18 +235,6 @@ export class PaneManager {
       tab.changes = info?.changes ?? 0;
       tab.gitRoot = info?.root ?? null;
       if (this.isActiveTab(ptyId)) this.paintStatusBar();
-    });
-
-    // The agent CLI publishes a short task summary via the terminal title (OSC);
-    // adopt it as the session's display title and persist it so it survives in the
-    // history pane after the terminal is gone.
-    term.onTitle((title) => {
-      const t = title.trim();
-      // Ignore shell-set titles (the bare exe path / cwd) — keep the folder name.
-      if (!isMeaningfulTitle(t) || tab.title === t) return;
-      tab.title = t;
-      pane.setTitle(ptyId, t);
-      void this.persistSession(tab, opts.claudeId ?? null);
     });
 
     const now = new Date().toISOString();
@@ -274,12 +258,12 @@ export class PaneManager {
   /** Re-save a session's current snapshot (folder/title/totals). Used when the
    *  title changes mid-session. Token/cost totals are owned by the session store,
    *  so we pass 0 to avoid clobbering them (it only overwrites when totals > 0). */
-  private async persistSession(tab: Tab, claudeId: string | null): Promise<void> {
+  private async persistSession(tab: Tab): Promise<void> {
     try {
       await window.api.sessions.save({
         id: tab.persistentId,
         folder: tab.folder,
-        claudeId,
+        claudeId: tab.claudeId,
         title: tab.title,
         createdAt: new Date().toISOString(),
         lastActive: new Date().toISOString(),
@@ -313,8 +297,7 @@ export class PaneManager {
       ptyId: SETTINGS_ID,
       folder: '',
       title: null,
-      status: 'idle',
-      busyStart: null,
+      claudeId: null,
       startedAt: Date.now(),
       totalCost: 0,
       totalTokens: 0,
@@ -324,8 +307,8 @@ export class PaneManager {
       gitRoot: null,
       term: view,
       btn: document.createElement('button'),
-      dot: document.createElement('span'),
-      elapsedEl: document.createElement('span'),
+      icon: document.createElement('span'),
+      exited: false,
     };
     this.ptyIndex.set(SETTINGS_ID, pane);
     pane.addTab(tab);
@@ -364,8 +347,7 @@ export class PaneManager {
       ptyId: path,
       folder: path, // the file path; the tab label uses its base name
       title: null,
-      status: 'idle',
-      busyStart: null,
+      claudeId: null,
       startedAt: Date.now(),
       totalCost: 0,
       totalTokens: 0,
@@ -375,8 +357,8 @@ export class PaneManager {
       gitRoot: null,
       term: view,
       btn: document.createElement('button'),
-      dot: document.createElement('span'),
-      elapsedEl: document.createElement('span'),
+      icon: document.createElement('span'),
+      exited: false,
     };
     // Resolve the owning pane at call time so the dirty dot keeps working after
     // the tab is relocated to another pane.
@@ -396,6 +378,7 @@ export class PaneManager {
     }
     // The Settings tab has no backing PTY — don't try to kill one.
     if (tab?.kind === 'terminal') window.api.pty.kill(ptyId);
+    this.cancelTitlePersist(ptyId);
     this.ptyIndex.delete(ptyId);
     pane.removeTab(ptyId);
     this.paintStatusBar();
@@ -518,15 +501,46 @@ export class PaneManager {
     this.ptyIndex.get(id)?.get(id)?.term.feed?.(data);
   }
 
-  routeStatus(id: string, status: Tab['status']): void {
+  /**
+   * The session's program set the terminal title. Agent CLIs publish their state
+   * there (Claude Code animates a glyph in it while it works), so this is what
+   * gives a tab its liveness. It arrives straight from the main process off the
+   * raw PTY stream, so a background tab's label tracks its agent exactly like the
+   * focused one — no dependence on the hidden terminal being rendered.
+   */
+  routeTitle(id: string, title: string): void {
     const pane = this.ptyIndex.get(id);
     const tab = pane?.get(id);
-    if (!pane || !tab) return;
-    tab.status = status;
-    if (status === 'busy' && !tab.busyStart) tab.busyStart = Date.now();
-    if (status !== 'busy') tab.busyStart = null;
-    pane.paintStatus(tab);
-    if (this.isActiveTab(id)) this.paintStatusBar();
+    if (!pane || !tab || tab.kind !== 'terminal') return;
+    const t = title.trim();
+    // Ignore shell-set titles (the bare exe path / cwd) — keep the folder name.
+    if (!isMeaningfulTitle(t) || tab.title === t) return;
+    tab.title = t;
+    pane.setTitle(id, t);
+    this.scheduleTitlePersist(tab);
+  }
+
+  /** Write the tab's latest title to the session store at most once per
+   *  TITLE_PERSIST_MS, so an animating title can't storm the store or the
+   *  history pane. The timer reads `tab.title` when it fires, so the value that
+   *  lands is the newest one. */
+  private scheduleTitlePersist(tab: Tab): void {
+    if (this.titleSaves.has(tab.ptyId)) return;
+    this.titleSaves.set(
+      tab.ptyId,
+      setTimeout(() => {
+        this.titleSaves.delete(tab.ptyId);
+        void this.persistSession(tab);
+      }, TITLE_PERSIST_MS),
+    );
+  }
+
+  /** Drop a tab's pending title write (it's going away). */
+  private cancelTitlePersist(ptyId: string): void {
+    const t = this.titleSaves.get(ptyId);
+    if (t === undefined) return;
+    clearTimeout(t);
+    this.titleSaves.delete(ptyId);
   }
 
   routeUsage(id: string, tokensIn: number, tokensOut: number): void {
@@ -547,12 +561,7 @@ export class PaneManager {
   }
 
   routeExit(id: string): void {
-    const pane = this.ptyIndex.get(id);
-    const tab = pane?.get(id);
-    if (pane && tab) {
-      tab.status = 'done';
-      pane.paintStatus(tab);
-    }
+    this.ptyIndex.get(id)?.markExited(id);
   }
 
   // --- status bar -------------------------------------------------------
@@ -585,10 +594,6 @@ export class PaneManager {
     this.paintBranchStatus(tab);
     this.paintChangesStatus(tab);
     this.paintContextStatus(tab);
-    this.setText(
-      this.statusValue('status-elapsed'),
-      tab && tab.busyStart ? fmtElapsed(Date.now() - tab.busyStart) : '—',
-    );
   }
 
   /** Tell the folder tree which directory the active session lives in — but only
@@ -682,20 +687,5 @@ export class PaneManager {
     this.setText(el, `${pct}%`);
     el.style.color =
       pct >= 95 ? 'var(--color-danger)' : pct >= 80 ? 'var(--color-warn)' : '';
-  }
-
-  /** Tick elapsed timers across all panes (called on an interval). */
-  tickElapsed(): void {
-    for (const pane of this.panes) {
-      for (const tab of pane.tabList()) {
-        const ms = tab.busyStart ? Date.now() - tab.busyStart : 0;
-        this.setText(tab.elapsedEl, ms >= ELAPSED_MIN_MS ? fmtElapsed(ms) : '');
-      }
-    }
-    const active = this.active?.activeTab();
-    this.setText(
-      this.statusValue('status-elapsed'),
-      active && active.busyStart ? fmtElapsed(Date.now() - active.busyStart) : '—',
-    );
   }
 }

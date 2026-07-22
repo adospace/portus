@@ -393,6 +393,8 @@ async function readSettings(): Promise<AppSettings> {
           ? g.sessionRetentionDays
           : DEFAULT_GENERAL.sessionRetentionDays,
       theme,
+      showSessions:
+        typeof g.showSessions === 'boolean' ? g.showSessions : DEFAULT_GENERAL.showSessions,
     };
     return {
       commands: Array.isArray(parsed.commands) ? parsed.commands : DEFAULT_SETTINGS.commands,
@@ -524,7 +526,7 @@ function registerIpc(): void {
 app.whenReady().then(async () => {
   pty = new PtyManager({
     onData: (id, data) => send(Channels.ptyData, id, data),
-    onStatus: (id, status) => send(Channels.ptyStatus, id, status),
+    onTitle: (id, title) => send(Channels.ptyTitle, id, title),
     onUsage: (id, tIn, tOut) => send(Channels.ptyUsage, id, tIn, tOut),
     onExit: (id, code) => send(Channels.ptyExit, id, code),
   });

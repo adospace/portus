@@ -16,7 +16,7 @@
   --color-fg: #e6edf3;
   --color-muted: #7d8590;
   --color-accent: #f78166;
-  --color-busy: #f78166;
+  /* Healthy end of the context-fill gauge (amber/red take over near the cap). */
   --color-idle: #3fb950;
   --color-warn: #d29922;
   --color-danger: #f85149;
@@ -40,11 +40,24 @@
   --color-fg: #1f2328;
   --color-muted: #656d76;
   --color-accent: #bc4c2e;
-  --color-busy: #bc4c2e;
   --color-idle: #1a7f37;
   --color-warn: #9a6700;
   --color-danger: #cf222e;
   --color-selection: #add6ff;
+}
+
+/* Outer 3-pane grid: folder tree | splitter | center | splitter | sessions.
+   The column widths live in --col-left / --col-right, which the outer splitters
+   (app.ts) write. This lives here rather than in an inline style so the
+   collapsed variant below can override it — an inline grid-template would win
+   over any class. */
+#shell {
+  grid-template-columns: var(--col-left, 260px) 5px minmax(0, 1fr) 5px var(--col-right, 280px);
+}
+/* Sessions pane hidden (title-bar toggle): collapse its column and its splitter,
+   leaving --col-right untouched so the user's width comes back on re-show. */
+#shell.sessions-hidden {
+  grid-template-columns: var(--col-left, 260px) 5px minmax(0, 1fr) 0 0;
 }
 
 /* Each terminal fills its pane's stack; only the active one is visible. */
@@ -120,20 +133,6 @@ body.resizing .term-host {
   background: var(--color-tab-active);
   border-color: var(--color-edge);
   box-shadow: inset 0 -2px 0 0 var(--color-accent);
-}
-
-/* Pulsing dot for the "busy" tab indicator. */
-@keyframes portus-pulse {
-  0%,
-  100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.35;
-  }
-}
-.dot-busy {
-  animation: portus-pulse 1s ease-in-out infinite;
 }
 
 /* xterm scrollbar polish */

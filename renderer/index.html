@@ -29,6 +29,10 @@
 
       <!-- Right cluster: layout selector + window controls -->
       <div class="flex items-center h-full" style="-webkit-app-region: no-drag">
+        <button id="toggle-sessions" title="Sessions pane"
+          class="flex items-center justify-center w-7 h-7 mr-3 rounded text-muted hover:text-fg hover:bg-edge/60">
+          <iconify-icon icon="lucide:history"></iconify-icon>
+        </button>
         <div id="layout-select" class="flex items-center gap-0.5 px-2">
           <button data-mode="single" title="Single view"
             class="layout-btn flex items-center justify-center w-7 h-7 rounded text-muted hover:text-fg hover:bg-edge/60">
@@ -70,8 +74,7 @@
 
     <!-- Three-pane mission-control layout: folder tree | center | history.
          Outer columns are resizable via the .gutter-col splitters. -->
-    <div id="shell" class="grid flex-1 min-h-0"
-      style="grid-template-columns: var(--col-left, 260px) 5px minmax(0, 1fr) 5px var(--col-right, 280px)">
+    <div id="shell" class="grid flex-1 min-h-0">
       <!-- Left: folder tree -->
       <aside class="flex flex-col border-r border-edge bg-panel min-h-0 min-w-0">
         <header class="flex items-center gap-2 px-3 h-10 border-b border-edge shrink-0">
@@ -115,10 +118,6 @@
           </button>
           <span id="status-context" class="ml-auto flex items-center gap-1" title="Context window used">
             <iconify-icon icon="lucide:gauge"></iconify-icon>
-            <span>—</span>
-          </span>
-          <span id="status-elapsed" class="flex items-center gap-1">
-            <iconify-icon icon="lucide:clock"></iconify-icon>
             <span>—</span>
           </span>
         </footer>

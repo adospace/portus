@@ -132,14 +132,11 @@ export class TerminalTab {
     this.term.onData(cb);
   }
 
-  /**
-   * Fires when the program sets the terminal title via an OSC sequence
-   * (`\x1b]0;…\x07` / `\x1b]2;…`). Claude Code uses this to publish a short
-   * summary of the current task; we surface it as the session's display title.
-   */
-  onTitle(cb: (title: string) => void): void {
-    this.term.onTitleChange(cb);
-  }
+  // The window title (OSC 0/2) is not read here: xterm only parses it once the
+  // written bytes work their way through its buffer, which is scheduled work in
+  // the renderer and therefore hostage to whatever else the UI is doing. The
+  // main process parses it straight off the PTY stream instead (pty-manager.ts),
+  // so a background tab's label keeps pace with its agent.
 
   feed(data: string): void {
     this.term.write(data);

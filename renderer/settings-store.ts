@@ -56,6 +56,17 @@ export class SettingsStore {
     await window.api.settings.save(this.settings);
   }
 
+  /** Persist just the Sessions-pane visibility. Like the theme, it's toggled live
+   *  from outside the Settings form (the title-bar button), so it saves on change
+   *  rather than waiting for a section Save. */
+  async setShowSessions(showSessions: boolean): Promise<void> {
+    this.settings = {
+      ...this.settings,
+      general: { ...this.settings.general, showSessions },
+    };
+    await window.api.settings.save(this.settings);
+  }
+
   /** Replace and persist the full settings object. */
   async save(next: AppSettings): Promise<void> {
     this.settings = next;

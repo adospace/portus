@@ -18,9 +18,10 @@ What it gives you over a plain terminal:
 - **Many agents, one window.** Each session is a tab with its own real PTY (a true
   shell + agent CLI, not a fake terminal), so anything that works in your terminal
   works here.
-- **At-a-glance status.** Every tab shows whether its agent is *busy* (●, pulsing),
-  *idle* (◌), or *done* (✓), plus a live elapsed timer while it's working — so you
-  know which sessions need attention without clicking into them.
+- **At-a-glance status, straight from the agent.** A tab is labelled with the title
+  its agent publishes over OSC — including the glyph Claude Code animates while it's
+  thinking — so you can see which sessions are working without clicking into them.
+  The app adds no indicator of its own (see `## Tab liveness` below).
 - **Start sessions where the work is.** The left pane is a lazy folder tree rooted
   at a drive/volume you pick from a selector (Windows drive letters, macOS volumes);
   right-click any directory to launch an agent there.
@@ -61,7 +62,7 @@ JSON file (`sessions.json`) in the per-user app data dir — see `electron/sessi
 ```
 ┌─────────────┬──────────────────────────────┬─────────────────┐
 │ Folder Tree │        Terminal Tabs          │ Session History │
-│             │  [● proj-a] [◌ proj-b] [+]   │                 │
+│             │  [✳ proj-a] [proj-b] [+]     │                 │
 │  ~/dev      │ ┌──────────────────────────┐ │ proj-a  14:32   │
 │  ├ proj-a   │ │                          │ │ proj-b  13:10   │
 │  ├ proj-b   │ │   xterm.js canvas        │ │ ...             │
@@ -72,15 +73,14 @@ JSON file (`sessions.json`) in the per-user app data dir — see `electron/sessi
 ```
 
 **Left pane** — drive/volume selector (header) + folder tree (fs.readdir, lazy-loaded) rooted at the selected drive; defaults to the drive holding the user's home folder; right-click → "New session here". Clicking a directory **selects** it (persistent gray row tint) and reports the selection so the session list can mark same-folder rows with a gray edge line.
-**Center pane** — tabbed xterm.js terminals, tab shows: busy indicator (● animated / ◌ idle), folder name, elapsed time when busy
-**Right pane** — session list (current + past), click to restore, shows folder + timestamp; each row can show two left-edge folder-match lines: **gray** = same folder as the one selected in the tree, **orange** = same folder as the active tab (so same-folder sessions stand out)
-**Bottom bar** — active tab: working folder, context-window used, elapsed (right)
+**Center pane** — tabbed xterm.js terminals; a tab shows the agent's own OSC title (falling back to the folder name) plus the context-fill bar along its bottom edge — nothing else, so its width never changes while the session runs
+**Right pane** — session list (current + past), **shown on demand** — collapsed/restored by the title-bar toggle (see `## Window chrome` below), remembered across restarts; click a row to restore a session, shows folder + timestamp; each row can show two left-edge folder-match lines: **gray** = same folder as the one selected in the tree, **orange** = same folder as the active tab (so same-folder sessions stand out)
+**Bottom bar** — active tab: working folder, git branch, working-tree changes, context-window used (right)
 
 ## Core Features (v1)
 
 ### Session lifecycle
 - Spawn `claude` via node-pty from the target folder
-- Detect idle vs busy by parsing PTY output for Claude's prompt string (`✦` or `>`)
 - On app close: serialize all open sessions (folder, claude session ID from `--resume`) to the session store
 - On app start: restore sessions, re-attach via `claude --resume <id>`
 
@@ -96,12 +96,30 @@ JSON file (`sessions.json`) in the per-user app data dir — see `electron/sessi
 - Accumulate per session, display in bottom bar and session list
 - Cost calculation: use current Claude pricing constants (configurable)
 
-### Busy state detection
-- Tab indicator: ● (orange, pulsing) = busy, ◌ = idle, ✓ = completed (on PTY exit)
-- **As implemented** (`pty-manager.ts`): a cadence heuristic — any output marks the
-  session `busy`; after `IDLE_AFTER_MS` (700ms) of silence it flips to `idle`. This
-  sidesteps the brittle prompt-string parsing in the original design; swap in
-  prompt-marker detection (`✦`/`>`) here if it proves more reliable.
+### Tab liveness (replaces the old busy/idle tracker)
+- **The app tracks no activity state of its own.** There is no busy/idle/done dot,
+  no elapsed timer on the tab, and no elapsed segment in the status bar. The
+  previous cadence heuristic (any output → `busy`, 700ms of silence → `idle`)
+  flapped constantly against an agent CLI that redraws a spinner: the dot and the
+  timer appeared and vanished every second, and because both changed the tab's
+  width, the whole tab bar visibly jittered. Don't reintroduce a
+  variable-width element in the tab button.
+- **What signals liveness instead:** the agent's own window title. Claude Code
+  publishes its state over OSC 0/2 and animates a glyph in it while it works, so
+  the tab label *is* the activity indicator — with no guesswork on our side.
+- **Where it's parsed:** `pty-manager.ts` (`takeTitle`), off the raw PTY stream in
+  the main process, emitted as `pty:title` → `PaneManager.routeTitle`. Deliberately
+  **not** `xterm.onTitleChange`: xterm only surfaces the title after the written
+  bytes drain through its internal write buffer, which is renderer-scheduled work,
+  so a hidden tab's label lagged or stalled behind the focused one. Parsing in main
+  makes background tabs track their agent identically to the focused tab.
+  `takeTitle` carries a partial escape sequence across chunk boundaries and reports
+  only the last title per flush, so an animation burst collapses to one IPC message.
+- **Persistence is throttled** (`TITLE_PERSIST_MS`, 3s): the tab label follows every
+  animation frame (a text write), but writing to the session store must not — each
+  save rewrites `sessions.json` and rebuilds the history pane.
+- On PTY exit the tab label just dims (`Pane.markExited`) — a static marker, not an
+  animation.
 
 ### Context-window gauge
 - **What.** A per-tab "heaviness" indicator: how full the session's context window
@@ -169,7 +187,7 @@ JSON file (`sessions.json`) in the per-user app data dir — see `electron/sessi
 /
 ├── electron/
 │   ├── main.ts           # Electron main process: window, IPC broker, lifecycle
-│   ├── pty-manager.ts    # node-pty session management + busy/idle detection
+│   ├── pty-manager.ts    # node-pty session management + OSC window-title extraction
 │   ├── session-store.ts  # in-process JSON session persistence + cost rates (replaces the sidecar)
 │   ├── ipc.ts            # shared channel names + payload types (main/preload/renderer)
 │   └── preload.ts        # contextBridge → window.api
@@ -180,7 +198,7 @@ JSON file (`sessions.json`) in the per-user app data dir — see `electron/sessi
 │   ├── pane-manager.ts   # owns Pane[], active pane, ptyId→Pane routing, sessions, status bar
 │   ├── layout.ts         # LayoutManager: single/quad/six grids + inner gutters
 │   ├── splitter.ts       # reusable drag-to-resize gutter (outer panes + inner layout)
-│   ├── titlebar.ts       # custom window chrome: File▸{Settings,Exit}, gear btn, layout selector, win controls
+│   ├── titlebar.ts       # custom window chrome: File▸{Settings,Exit}, sessions toggle, layout selector, gear btn, win controls
 │   ├── terminal-tab.ts   # xterm.js wrapper (fit + web-links + WebGL addons; reparent)
 │   ├── folder-tree.ts    # left pane: drive/volume selector + lazy dir tree (fs.drives)
 │   ├── pinned-folders.ts # left pane (bottom): persistent pinned-folder quick-launch list
@@ -215,6 +233,20 @@ JSON file (`sessions.json`) in the per-user app data dir — see `electron/sessi
   `no-drag` on every interactive cluster. Window controls go over IPC
   (`win:minimize`/`win:maximizeToggle`/`win:close`/`win:isMaximized`/
   `win:maximizedChanged`, `app:quit`). The renderer reads `window.api.platform`.
+- **Sessions-pane toggle.** `#toggle-sessions` (Lucide `history`, same glyph as the
+  pane's own header) sits in the right cluster just left of the layout selector,
+  separated by a `mr-3` gap; it highlights (`bg-edge`/`text-fg`) while the pane is
+  shown, exactly like the active layout button. `TitleBar` owns only the button
+  state — `app.ts`'s `applySessionsVisible` does the work: it toggles
+  `#shell.sessions-hidden`, hides the aside + its splitter, and calls `refitAll()`
+  so the terminals pick up the wider center. The collapse is a **CSS class on
+  `#shell`**, which is why `grid-template-columns` lives in `styles.css` and not in
+  an inline style — an inline template would outrank the class. `--col-right` is
+  deliberately left untouched so the user's dragged width returns on re-show. The
+  choice persists as `general.showSessions` in `settings.json` (written on each
+  toggle via `SettingsStore.setShowSessions`, applied in `init()` after settings
+  load — the Settings form is not the editor for it, so its General save reads the
+  live value rather than its own snapshot).
 - **Pane model.** The center is one or more **panes**, each a self-contained tab group
   (`pane.ts`: own tab bar + `+` button + terminal stack + active tab). `PaneManager`
   (`pane-manager.ts`) owns the `Pane[]`, the single globally **active pane** (new

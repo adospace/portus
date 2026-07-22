@@ -205,6 +205,9 @@ export class SettingsView {
           defaultFolder: this.general.defaultFolder.trim(),
           sessionRetentionDays: Number.isFinite(days) && days > 0 ? days : 30,
           theme: this.general.theme,
+          // Not edited here — the title bar toggles it live, so read the current
+          // value rather than the snapshot this view took when it opened.
+          showSessions: this.store.general().showSessions,
         };
         const next: AppSettings = { ...this.store.get(), general };
         try {

@@ -13,7 +13,6 @@ import {
   type GitFileStatus,
   type GitInfo,
   type PersistedSession,
-  type SessionStatus,
   type SpawnRequest,
 } from './ipc.js';
 
@@ -34,8 +33,10 @@ const api = {
     kill: (id: string): void => ipcRenderer.send(Channels.ptyKill, id),
     onData: (cb: (id: string, data: string) => void): Unsubscribe =>
       on(Channels.ptyData, cb),
-    onStatus: (cb: (id: string, status: SessionStatus) => void): Unsubscribe =>
-      on(Channels.ptyStatus, cb),
+    /** The session's program set the terminal window title (OSC 0/2) — agent CLIs
+     *  publish their current task/state there, which becomes the tab's label. */
+    onTitle: (cb: (id: string, title: string) => void): Unsubscribe =>
+      on(Channels.ptyTitle, cb),
     onUsage: (cb: (id: string, tokensIn: number, tokensOut: number) => void): Unsubscribe =>
       on(Channels.ptyUsage, cb),
     onExit: (cb: (id: string, exitCode: number) => void): Unsubscribe =>

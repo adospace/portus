@@ -4,7 +4,7 @@
 // owns the set of panes and routes PTY events; a Pane only manages its own DOM
 // and tab set, delegating privileged work (spawn/kill/resize, status bar) back
 // to the manager through callbacks.
-import type { ContextUsage, SessionStatus } from '../electron/ipc';
+import type { ContextUsage } from '../electron/ipc';
 
 /**
  * The minimal surface a Pane needs from whatever fills a tab — a real terminal
@@ -30,10 +30,12 @@ export interface Tab {
   persistentId: string;
   ptyId: string;
   folder: string;
-  /** Agent-supplied title (terminal OSC). Null → label falls back to folder name. */
+  /** Agent-supplied title (terminal OSC). Null → label falls back to folder name.
+   *  Agent CLIs animate a glyph in here while they work, so this doubles as the
+   *  tab's liveness indicator — the app adds no status of its own. */
   title: string | null;
-  status: SessionStatus;
-  busyStart: number | null;
+  /** Claude session id to `--resume`, when one is known (persisted with the row). */
+  claudeId: string | null;
   /** When this session/tab was created (epoch ms). Used to ignore transcripts
    *  that predate it, so a fresh session never reads a prior run's context. */
   startedAt: number;
@@ -53,8 +55,11 @@ export interface Tab {
   gitRoot: string | null;
   term: TabContent;
   btn: HTMLButtonElement;
-  dot: HTMLElement;
-  elapsedEl: HTMLElement;
+  /** Leading glyph for non-terminal tabs (Settings/editor). Terminal tabs carry
+   *  no app-drawn icon — whatever the agent puts in its title is the icon. */
+  icon: HTMLElement;
+  /** True once the backing PTY exited; the label dims to mark a dead session. */
+  exited: boolean;
 }
 
 export interface PaneCallbacks {
@@ -146,7 +151,6 @@ export class Pane {
 
   addTab(tab: Tab): void {
     this.buildTabButton(tab);
-    this.paintStatus(tab);
     this.tabBarEl.insertBefore(tab.btn, this.newTabBtn);
     this.tabs.set(tab.ptyId, tab);
     this.activateTab(tab.ptyId);
@@ -227,18 +231,6 @@ export class Pane {
 
   // --- painting ---------------------------------------------------------
 
-  paintStatus(tab: Tab): void {
-    if (tab.kind !== 'terminal') return; // views carry a static icon, not a status dot
-    const map: Record<SessionStatus, { icon: string; color: string; busy: boolean }> = {
-      busy: { icon: 'lucide:circle', color: 'text-busy', busy: true },
-      idle: { icon: 'lucide:circle-dashed', color: 'text-muted', busy: false },
-      done: { icon: 'lucide:circle-check', color: 'text-idle', busy: false },
-    };
-    const s = map[tab.status];
-    tab.dot.className = `shrink-0 flex items-center ${s.color} ${s.busy ? 'dot-busy' : ''}`;
-    setIcon(tab.dot, s.icon);
-  }
-
   setActiveHighlight(on: boolean): void {
     this.root.classList.toggle('pane-active', on);
   }
@@ -281,47 +273,55 @@ export class Pane {
       this.cb.onTabContextMenu(tab.ptyId, e.clientX, e.clientY);
     });
 
-    // Non-terminal views (Settings) get a static icon + fixed label, no elapsed.
+    // Non-terminal views (Settings) get a static icon + fixed label.
     if (tab.kind === 'settings') {
-      tab.dot.className = 'shrink-0 flex items-center text-muted';
-      setIcon(tab.dot, 'lucide:settings');
+      tab.icon.className = 'shrink-0 flex items-center text-muted';
+      setIcon(tab.icon, 'lucide:settings');
       const name = document.createElement('span');
       name.textContent = 'Settings';
-      btn.replaceChildren(tab.dot, name, close);
+      btn.replaceChildren(tab.icon, name, close);
       return;
     }
 
     // Editor tabs: file icon + file name, plus a dirty dot (●) that the close ×
-    // replaces on hover (VS Code-style). No status dot, no elapsed timer.
+    // replaces on hover (VS Code-style).
     if (tab.kind === 'editor') {
-      tab.dot.className = 'shrink-0 flex items-center text-muted';
-      setIcon(tab.dot, 'lucide:file-pen');
+      tab.icon.className = 'shrink-0 flex items-center text-muted';
+      setIcon(tab.icon, 'lucide:file-pen');
       const name = document.createElement('span');
       name.className = 'tab-name truncate max-w-[20ch]';
       name.textContent = baseName(tab.folder);
       name.title = tab.folder;
       const dirty = document.createElement('span');
       dirty.className = 'tab-dirty shrink-0 w-2 h-2 rounded-full bg-fg hidden group-hover:hidden';
-      btn.replaceChildren(tab.dot, name, dirty, close);
+      btn.replaceChildren(tab.icon, name, dirty, close);
       return;
     }
 
-    tab.dot.className = 'shrink-0 flex items-center';
-    setIcon(tab.dot, 'lucide:circle');
-
+    // Terminal tabs are label-only: no app-drawn status glyph and no elapsed
+    // timer. Both used to appear and disappear as output came and went, which
+    // resized the tab and made the whole bar flicker. The agent's own title —
+    // which it animates while working — carries that signal instead, and a
+    // fixed-width label keeps the tab bar still.
     const name = document.createElement('span');
     name.className = 'tab-name truncate max-w-[20ch]';
     name.textContent = tab.title || baseName(tab.folder);
     name.title = tab.title || tab.folder;
-
-    tab.elapsedEl.className = 'text-xs text-muted tabular-nums';
 
     // Thin context-fill bar along the bottom edge of the tab (painted by paintContext).
     const ctx = document.createElement('span');
     ctx.className = 'tab-ctx absolute left-0 bottom-0 h-[2px] rounded-full';
     ctx.style.width = '0';
 
-    btn.replaceChildren(tab.dot, name, tab.elapsedEl, close, ctx);
+    btn.replaceChildren(name, close, ctx);
+  }
+
+  /** Dim a terminal tab's label once its PTY has exited (a dead session). */
+  markExited(ptyId: string): void {
+    const tab = this.tabs.get(ptyId);
+    if (!tab || tab.kind !== 'terminal') return;
+    tab.exited = true;
+    tab.btn.querySelector<HTMLElement>('.tab-name')?.classList.add('opacity-40');
   }
 
   /** Paint the per-tab context-fill bar: green → amber (≥80%) → red (≥95%). */
