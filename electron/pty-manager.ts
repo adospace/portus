@@ -28,6 +28,8 @@ interface Session {
   titleCarry: string;
   /** Last title reported to the renderer — repeats are dropped. */
   lastTitle: string | null;
+  /** Tail of the previous chunk, so a split DECSET 1004 still matches. */
+  focusCarry: string;
 }
 
 function defaultShell(): string {
@@ -60,6 +62,20 @@ const OSC_TITLE_RE = /\x1b\][02];([^\x07\x1b]*)(?:\x07|\x1b\\)/g;
 const OSC_TITLE_PARTIAL_RE = /^\x1b\][02]?;?[^\x07\x1b]*$/;
 /** Cap on the carried-over fragment, so a stray `ESC ]` can't grow unbounded. */
 const TITLE_CARRY_MAX = 1024;
+
+// --- Focus spoofing --------------------------------------------------------
+// Claude Code enables focus reporting (DECSET 1004) and *pauses its title
+// animation* while the terminal reports focus-out — it even assumes unfocused
+// until the first focus-in arrives. In a tab UI that kills the liveness signal:
+// a deselected tab's xterm is blurred, and one spawned in a background tab is
+// never focused at all. So every session plays "always focused": the renderer
+// swallows xterm's real focus reports (terminal-tab.ts), and this side answers
+// each mode-enable with a synthetic focus-in.
+
+/** DECSET 1004 — the app asked the terminal to start reporting focus. */
+const FOCUS_REPORT_ENABLE = '\x1b[?1004h';
+/** Focus-in report (CSI I): what a focused terminal answers with. */
+const FOCUS_IN = '\x1b[I';
 
 /**
  * Pull the most recent window title out of a chunk, carrying an incomplete
@@ -109,6 +125,7 @@ export class PtyManager {
       flushScheduled: false,
       titleCarry: '',
       lastTitle: null,
+      focusCarry: '',
     };
     this.sessions.set(id, session);
 
@@ -175,5 +192,18 @@ export class PtyManager {
       session.lastTitle = title;
       this.listeners.onTitle(session.id, title);
     }
+
+    // App turned on focus reporting → tell it the terminal is focused. The
+    // carry is one char shorter than the sequence, so a match can never sit
+    // wholly inside it and fire twice (a repeat would be harmless anyway).
+    const scan = session.focusCarry + data;
+    if (scan.includes(FOCUS_REPORT_ENABLE)) {
+      try {
+        session.proc.write(FOCUS_IN);
+      } catch {
+        /* proc already gone — this flush came from onExit */
+      }
+    }
+    session.focusCarry = scan.slice(1 - FOCUS_REPORT_ENABLE.length);
   }
 }

@@ -115,6 +115,17 @@ JSON file (`sessions.json`) in the per-user app data dir — see `electron/sessi
   makes background tabs track their agent identically to the focused tab.
   `takeTitle` carries a partial escape sequence across chunk boundaries and reports
   only the last title per flush, so an animation burst collapses to one IPC message.
+- **Focus spoofing keeps background titles animating.** Claude Code enables focus
+  reporting (DECSET 1004) and **pauses its title animation while the terminal
+  reports focus-out** — and it assumes unfocused until the first focus-in arrives.
+  Untreated, that froze every deselected tab's glyph (its xterm blurs when another
+  tab takes DOM focus) and background-spawned sessions never animated at all. So
+  every tab plays "always focused": `terminal-tab.ts` swallows xterm's real
+  CSI I/O focus reports before they reach the PTY, and `pty-manager.ts` answers
+  each `ESC[?1004h` in the output stream with a synthetic focus-in (CSI I).
+  Tradeoff: an agent can never tell its tab is backgrounded (e.g. unfocused-only
+  bell/notification behavior won't trigger) — accepted, since the animated title
+  across all tabs *is* the app's core at-a-glance signal.
 - **Persistence is throttled** (`TITLE_PERSIST_MS`, 3s): the tab label follows every
   animation frame (a text write), but writing to the session store must not — each
   save rewrites `sessions.json` and rebuilds the history pane.

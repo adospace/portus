@@ -129,7 +129,16 @@ export class TerminalTab {
   }
 
   onInput(cb: (data: string) => void): void {
-    this.term.onData(cb);
+    // xterm reports focus changes (CSI I / CSI O, each as its own data event)
+    // to apps that enable DECSET 1004. In a tab UI those reports are poison:
+    // switching tabs blurs the deselected terminal, and Claude Code freezes its
+    // title animation — the tab's whole liveness signal — the moment it hears
+    // focus-out. Drop the real reports; pty-manager.ts answers the mode-enable
+    // with a synthetic focus-in, so every agent runs believing it's focused.
+    this.term.onData((data) => {
+      if (data === '\x1b[I' || data === '\x1b[O') return;
+      cb(data);
+    });
   }
 
   // The window title (OSC 0/2) is not read here: xterm only parses it once the
