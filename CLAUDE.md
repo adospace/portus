@@ -72,7 +72,7 @@ JSON file (`sessions.json`) in the per-user app data dir — see `electron/sessi
 └─────────────┴──────────────────────────────┴─────────────────┘
 ```
 
-**Left pane** — drive/volume selector (header) + folder tree (fs.readdir, lazy-loaded) rooted at the selected drive; defaults to the drive holding the user's home folder; right-click → "New session here". Clicking a directory **selects** it (persistent gray row tint) and reports the selection so the session list can mark same-folder rows with a gray edge line.
+**Left pane** — drive/volume selector (header) + folder tree (fs.readdir, lazy-loaded) rooted at the selected drive; defaults to the drive holding the user's home folder; right-click → "New session here". Dot-prefixed entries are hidden only on macOS/Linux, where the dot *is* the hidden convention; on Windows (`fs:listDir` in `main.ts`) `.certs`/`.github`/`.claude` are listed like any other folder. Clicking a directory **selects** it (persistent gray row tint) and reports the selection so the session list can mark same-folder rows with a gray edge line.
 **Center pane** — tabbed xterm.js terminals; a tab shows the agent's own OSC title (falling back to the folder name) plus the context-fill bar along its bottom edge — nothing else, so its width never changes while the session runs
 **Right pane** — session list (current + past), **shown on demand** — collapsed/restored by the title-bar toggle (see `## Window chrome` below), remembered across restarts; click a row to restore a session, shows folder + timestamp; each row can show two left-edge folder-match lines: **gray** = same folder as the one selected in the tree, **orange** = same folder as the active tab (so same-folder sessions stand out)
 **Bottom bar** — active tab: working folder, git branch, working-tree changes, context-window used (right)
@@ -265,6 +265,12 @@ JSON file (`sessions.json`) in the per-user app data dir — see `electron/sessi
   `ptyId→Pane` index for routing PTY events, and the one global status bar. It is the
   **sole caller** of `window.api.pty.*`; panes delegate spawn/kill/resize + status
   painting back through callbacks.
+- **Closing a tab lands on the previous one, not the first.** Each `Pane` keeps a
+  most-recently-activated list (`recent`, maintained by `activateTab`, pruned by
+  `removeTab`/`releaseTab`). `nextTabId()` is the single fallback rule — closing the
+  active tab, moving a tab out of a pane, and shrinking the layout all use it — so
+  you always return to where you came from (browser-style), with the leftmost tab
+  only as a last resort (e.g. an adopted tab that was never shown).
 - **Layouts.** `LayoutManager` (`layout.ts`) builds `#layout-grid` for `single` (1),
   `quad` (2×2 = 4), `six` (3×2 = 6). Switching **grows** (adds empty panes) or
   **shrinks** (relocates orphaned tabs into the last surviving pane via

@@ -478,8 +478,13 @@ function registerIpc(): void {
   );
   ipcMain.handle(Channels.fsListDir, async (_e, dirPath: string): Promise<DirEntry[]> => {
     const entries = await readdir(dirPath, { withFileTypes: true });
+    // Hide dot-entries only where a leading dot *means* hidden (macOS/Linux). On
+    // Windows the hidden flag is a file attribute, not a naming convention, so
+    // `.certs` / `.github` / `.claude` are ordinary folders the user expects to
+    // find in the tree — and legitimate places to start a session.
+    const hideDotfiles = process.platform !== 'win32';
     return entries
-      .filter((e) => !e.name.startsWith('.'))
+      .filter((e) => !(hideDotfiles && e.name.startsWith('.')))
       .map((e) => ({ name: e.name, path: join(dirPath, e.name), isDirectory: e.isDirectory() }))
       .sort((a, b) => {
         if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1;

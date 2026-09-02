@@ -107,6 +107,10 @@ export class Pane {
   private readonly newTabBtn: HTMLButtonElement;
   private readonly tabs = new Map<string, Tab>();
   private activeTabId: string | null = null;
+  /** Tab ids in most-recently-activated order (front = current). Closing the
+   *  active tab falls back along this list, so you land where you came from
+   *  rather than on the leftmost tab. */
+  private recent: string[] = [];
   private readonly ro: ResizeObserver;
   private raf = 0;
 
@@ -163,8 +167,9 @@ export class Pane {
     tab.term.dispose();
     tab.btn.remove();
     this.tabs.delete(ptyId);
+    this.forgetRecent(ptyId);
     if (this.activeTabId === ptyId) {
-      const next = [...this.tabs.keys()][0] ?? null;
+      const next = this.nextTabId();
       this.activeTabId = null;
       if (next) this.activateTab(next);
       else this.cb.onEmpty(this);
@@ -177,8 +182,15 @@ export class Pane {
     if (!tab) return undefined;
     tab.btn.remove();
     this.tabs.delete(ptyId);
+    this.forgetRecent(ptyId);
     if (this.activeTabId === ptyId) this.activeTabId = null;
     return tab;
+  }
+
+  /** The tab to show when the active one goes away: the most recently active
+   *  remaining tab, else the first in the bar (e.g. an adopted, never-shown one). */
+  nextTabId(): string | null {
+    return this.recent[0] ?? this.tabIds()[0] ?? null;
   }
 
   /** Receive a tab released from another pane (kept hidden until activated). */
@@ -192,6 +204,8 @@ export class Pane {
   activateTab(ptyId: string): void {
     if (!this.tabs.has(ptyId)) return;
     this.activeTabId = ptyId;
+    this.forgetRecent(ptyId);
+    this.recent.unshift(ptyId);
     for (const [id, tab] of this.tabs) {
       const isActive = id === ptyId;
       if (isActive) tab.term.show();
@@ -247,6 +261,11 @@ export class Pane {
   }
 
   // --- internals --------------------------------------------------------
+
+  private forgetRecent(ptyId: string): void {
+    const i = this.recent.indexOf(ptyId);
+    if (i >= 0) this.recent.splice(i, 1);
+  }
 
   private fitTab(tab: Tab): void {
     const dims = tab.term.fit();

@@ -127,7 +127,7 @@ export class PaneManager {
     this.panes.length = n;
     // Ensure the survivor shows something if it just inherited tabs.
     if (!survivor.activeTab() && survivor.count() > 0) {
-      survivor.activateTab(survivor.tabIds()[0]!);
+      survivor.activateTab(survivor.nextTabId()!);
     }
   }
 
@@ -481,9 +481,9 @@ export class PaneManager {
     this.ptyIndex.set(ptyId, to);
     to.activateTab(ptyId);
 
-    // releaseTab leaves the source with no active tab — surface its next one (or
-    // let it sit empty, which is fine in a multi-pane layout).
-    if (!from.activeTab() && from.count() > 0) from.activateTab(from.tabIds()[0]!);
+    // releaseTab leaves the source with no active tab — surface its most recently
+    // used one (or let it sit empty, which is fine in a multi-pane layout).
+    if (!from.activeTab() && from.count() > 0) from.activateTab(from.nextTabId()!);
 
     this.setActivePane(to);
   }
