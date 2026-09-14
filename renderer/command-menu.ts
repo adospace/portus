@@ -9,8 +9,13 @@ import type { CommandPreset } from '../electron/ipc';
 export interface MenuAction {
   icon: string;
   label: string;
+  /** Tint the item as a destructive action (e.g. Move to Recycle Bin). */
+  danger?: boolean;
   onSelect: () => void;
 }
+
+/** An extras entry: an actionable item or a horizontal divider. */
+export type MenuExtra = MenuAction | 'separator';
 
 let active: HTMLElement | null = null;
 
@@ -33,7 +38,7 @@ export function openCommandMenu(
   y: number,
   commands: CommandPreset[],
   onPick: (cmd: CommandPreset) => void,
-  extra: MenuAction[] = [],
+  extra: MenuExtra[] = [],
 ): void {
   closeCommandMenu();
 
@@ -44,9 +49,16 @@ export function openCommandMenu(
 
   if (extra.length > 0) {
     for (const action of extra) {
+      if (action === 'separator') {
+        const hr = document.createElement('div');
+        hr.className = 'my-1 border-t border-edge';
+        menu.appendChild(hr);
+        continue;
+      }
       const item = document.createElement('button');
       item.className =
-        'flex w-full items-center gap-2 px-3 py-1.5 text-left text-fg hover:bg-edge/60';
+        'flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-edge/60 ' +
+        (action.danger ? 'text-danger' : 'text-fg');
       const icon = document.createElement('span');
       icon.className = 'shrink-0 flex items-center text-muted';
       icon.innerHTML = `<iconify-icon icon="${action.icon}"></iconify-icon>`;

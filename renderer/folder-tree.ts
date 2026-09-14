@@ -3,7 +3,7 @@
 // user's home folder. Directories expand on click and load their children on
 // demand. Right-clicking a directory opens a context menu to start a session there.
 import type { CommandPreset, DirEntry, Drive, GitFileStatus } from '../electron/ipc';
-import { openCommandMenu } from './command-menu';
+import { openCommandMenu, type MenuExtra } from './command-menu';
 import { openContextMenu } from './context-menu';
 import { copyFilePathLabel, copyPathAction, openInFileManager, revealAction, trashLabel } from './file-manager';
 
@@ -39,8 +39,9 @@ export class FolderTree {
     private readonly getCommands: () => CommandPreset[],
     private readonly onRunCommand: (folder: string, command: string) => void,
     private readonly onPinFolder: (folder: string) => void,
-    /** A directory row was clicked → became the "selected" folder. */
-    private readonly onSelectFolder: (folder: string) => void,
+    /** A directory row was clicked → became the "selected" folder (null once the
+     *  selected folder is moved to the trash). */
+    private readonly onSelectFolder: (folder: string | null) => void,
     /** A file row was double-clicked → open it (editor for text, OS handler else). */
     private readonly onOpenFile: (path: string) => void,
   ) {
@@ -325,12 +326,22 @@ export class FolderTree {
   }
 
   private openMenu(x: number, y: number, folder: string, wrap: HTMLElement): void {
-    openCommandMenu(x, y, this.getCommands(), (cmd) => this.onRunCommand(folder, cmd.command), [
+    const extras: MenuExtra[] = [
       { icon: 'lucide:refresh-cw', label: 'Refresh', onSelect: () => void this.refresh(wrap) },
       { icon: 'lucide:pin', label: 'Pin folder', onSelect: () => this.onPinFolder(folder) },
       revealAction(folder),
       copyPathAction(folder),
-    ]);
+    ];
+    // The tree root is a drive/volume — never offer to trash that.
+    if (wrap !== this.root.firstElementChild) {
+      extras.push('separator', {
+        icon: 'lucide:trash-2',
+        label: trashLabel(),
+        danger: true,
+        onSelect: () => void this.trashItem(folder, wrap),
+      });
+    }
+    openCommandMenu(x, y, this.getCommands(), (cmd) => this.onRunCommand(folder, cmd.command), extras);
   }
 
   /** Right-click on a file row: open it in the app, hand it to the OS default
@@ -341,18 +352,34 @@ export class FolderTree {
       { icon: 'lucide:external-link', label: 'Open with default app', onSelect: () => openInFileManager(path) },
       copyPathAction(path, copyFilePathLabel),
       'separator',
-      { icon: 'lucide:trash-2', label: trashLabel(), danger: true, onSelect: () => void this.trashFile(path, wrap) },
+      { icon: 'lucide:trash-2', label: trashLabel(), danger: true, onSelect: () => void this.trashItem(path, wrap) },
     ]);
   }
 
-  /** Move a file to the OS Recycle Bin / Trash and drop its node from the tree. */
-  private async trashFile(path: string, wrap: HTMLElement): Promise<void> {
+  /** Move a file or folder to the OS Recycle Bin / Trash and drop its node from the
+   *  tree. Electron aborts (rather than permanently deleting) anything the bin can't
+   *  take, so a failure leaves the item on disk and the node in place. */
+  private async trashItem(path: string, wrap: HTMLElement): Promise<void> {
     try {
       await window.api.shell.trashItem(path);
-      wrap.remove();
     } catch {
-      /* couldn't trash (permission / in use) — leave the node in place */
+      const isDir = wrap.dataset['isdir'] === '1';
+      const bin = window.api.platform === 'win32' ? 'the Recycle Bin' : 'the Trash';
+      window.alert(
+        `Couldn't move "${path}" to ${bin}.\n\n` +
+          (isDir
+            ? 'Something inside it may be in use (e.g. a session running in that folder), ' +
+              'or it may be too large for the bin.'
+            : 'It may be in use or you may not have permission.'),
+      );
+      return;
     }
+    // Trashing the selected folder (or one of its ancestors) clears the selection.
+    if (this.selectedRow && wrap.contains(this.selectedRow)) {
+      this.selectedRow = null;
+      this.onSelectFolder(null);
+    }
+    wrap.remove();
   }
 
   /** Re-read a directory's children from disk: clears the loaded child nodes and,
