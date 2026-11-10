@@ -81,7 +81,7 @@ export interface PaneCallbacks {
   resize: (ptyId: string, cols: number, rows: number) => void;
 }
 
-function baseName(p: string): string {
+export function baseName(p: string): string {
   const parts = p.split(/[\\/]/).filter(Boolean);
   return parts[parts.length - 1] ?? p;
 }

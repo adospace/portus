@@ -3,7 +3,7 @@
 // creation, and routing of PTY events from the main process. It is the sole
 // caller of window.api.pty.* — panes delegate privileged work here.
 import { TerminalTab } from './terminal-tab';
-import { Pane } from './pane';
+import { Pane, baseName } from './pane';
 import type { Tab } from './pane';
 import { SettingsView } from './settings-view';
 import { EditorView } from './editor-view';
@@ -376,6 +376,25 @@ export class PaneManager {
       void this.closeEditorTab(pane, tab);
       return;
     }
+    // A live terminal asks first: we can't tell whether the agent is mid-task,
+    // so every running session confirms (exited/dimmed tabs close silently).
+    if (tab?.kind === 'terminal' && !tab.exited) {
+      void this.confirmCloseTerminal(tab);
+      return;
+    }
+    this.removeTerminalOrView(pane, ptyId);
+  }
+
+  private async confirmCloseTerminal(tab: Tab): Promise<void> {
+    const ok = await window.api.dialog.confirmCloseTab(baseName(tab.folder), tab.folder);
+    // The tab may have moved panes or been closed while the dialog was open.
+    const owner = this.ptyIndex.get(tab.ptyId);
+    if (!ok || !owner) return;
+    this.removeTerminalOrView(owner, tab.ptyId);
+  }
+
+  private removeTerminalOrView(pane: Pane, ptyId: string): void {
+    const tab = pane.get(ptyId);
     // The Settings tab has no backing PTY — don't try to kill one.
     if (tab?.kind === 'terminal') window.api.pty.kill(ptyId);
     this.cancelTitlePersist(ptyId);

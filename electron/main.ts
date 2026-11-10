@@ -114,6 +114,42 @@ async function confirmSave(name: string): Promise<ConfirmSaveChoice> {
   return res.response === 0 ? 'save' : res.response === 1 ? 'discard' : 'cancel';
 }
 
+/** Ask before closing a terminal tab whose PTY is still running. We can't
+ *  reliably tell whether the agent is mid-task, so every live tab asks. */
+async function confirmCloseTab(name: string, folder: string): Promise<boolean> {
+  if (!win) return false;
+  const res = await dialog.showMessageBox(win, {
+    type: 'warning',
+    buttons: ['Close Session', 'Cancel'],
+    defaultId: 1,
+    cancelId: 1,
+    noLink: true,
+    message: `Close the session "${name}"?`,
+    detail: `${folder}
+
+The running process in this tab will be terminated.`,
+  });
+  return res.response === 0;
+}
+
+/** Ask before closing the window (and with it every live session). */
+async function confirmQuit(live: number): Promise<boolean> {
+  if (!win) return true;
+  const res = await dialog.showMessageBox(win, {
+    type: 'warning',
+    buttons: ['Quit', 'Cancel'],
+    defaultId: 1,
+    cancelId: 1,
+    noLink: true,
+    message: `Quit portus?`,
+    detail:
+      live === 1
+        ? 'There is 1 running session. It will be terminated.'
+        : `There are ${live} running sessions. They will all be terminated.`,
+  });
+  return res.response === 0;
+}
+
 // --- Context-window gauge -------------------------------------------------
 // Claude Code writes a per-session transcript at
 // ~/.claude/projects/<encoded-cwd>/<session-id>.jsonl. The latest assistant
@@ -439,6 +475,25 @@ function createWindow(): void {
   // Keep the renderer's max/restore button glyph in sync with the real state.
   win.on('maximize', () => send(Channels.winMaximizedChanged, true));
   win.on('unmaximize', () => send(Channels.winMaximizedChanged, false));
+  // Every close path — title-bar ×, File ▸ Exit (app.quit), Alt+F4, Cmd+Q,
+  // taskbar close — funnels through the window's 'close' event, so the
+  // "terminate running sessions?" prompt lives here once.
+  let closeConfirmed = false;
+  let closePrompting = false;
+  win.on('close', (e) => {
+    const live = pty?.liveCount ?? 0;
+    if (closeConfirmed || live === 0) return;
+    e.preventDefault();
+    if (closePrompting) return;
+    closePrompting = true;
+    void confirmQuit(live).then((ok) => {
+      closePrompting = false;
+      if (!ok) return;
+      closeConfirmed = true;
+      if (process.platform === 'darwin') app.quit();
+      else win?.close();
+    });
+  });
   win.on('closed', () => {
     win = null;
   });
@@ -469,6 +524,9 @@ function registerIpc(): void {
   });
   ipcMain.handle(Channels.dialogConfirmSave, (_e, name: string): Promise<ConfirmSaveChoice> =>
     confirmSave(name),
+  );
+  ipcMain.handle(Channels.dialogConfirmCloseTab, (_e, name: string, folder: string): Promise<boolean> =>
+    confirmCloseTab(name, folder),
   );
   ipcMain.handle(Channels.shellOpenPath, (_e, path: string): Promise<string> =>
     shell.openPath(path),

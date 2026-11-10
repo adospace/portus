@@ -59,6 +59,9 @@ const api = {
     /** Native "save changes?" prompt for closing a dirty editor tab. */
     confirmSave: (name: string): Promise<ConfirmSaveChoice> =>
       ipcRenderer.invoke(Channels.dialogConfirmSave, name),
+    /** Native "close this running session?" prompt; resolves true to close. */
+    confirmCloseTab: (name: string, folder: string): Promise<boolean> =>
+      ipcRenderer.invoke(Channels.dialogConfirmCloseTab, name, folder),
   },
   shell: {
     /** Open a path in the OS file manager (Explorer / Finder). */

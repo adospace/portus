@@ -197,6 +197,7 @@ export const Channels = {
   fsReadFile: 'fs:readFile',
   fsWriteFile: 'fs:writeFile',
   dialogConfirmSave: 'dialog:confirmSave',
+  dialogConfirmCloseTab: 'dialog:confirmCloseTab',
   shellOpenPath: 'shell:openPath',
   shellTrashItem: 'shell:trashItem',
   gitInfo: 'git:info',

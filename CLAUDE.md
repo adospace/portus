@@ -83,6 +83,11 @@ JSON file (`sessions.json`) in the per-user app data dir — see `electron/sessi
 - Spawn `claude` via node-pty from the target folder
 - On app close: serialize all open sessions (folder, claude session ID from `--resume`) to the session store
 - On app start: restore sessions, re-attach via `claude --resume <id>`
+- **Close confirmation.** We can't tell whether an agent is mid-task, so closing any
+  *live* terminal tab always asks first (`PaneManager.closeTab` →
+  `dialog.confirmCloseTab`; exited/dimmed tabs close silently). Closing the app asks
+  once when any PTY is still alive — handled in `main.ts`'s window `'close'` event,
+  which every exit path (title-bar ×, File ▸ Exit, Alt+F4, Cmd+Q) goes through.
 
 ### Session persistence
 - `SessionStore` (`electron/session-store.ts`) owns `sessions.json` in `app.getPath('userData')`:

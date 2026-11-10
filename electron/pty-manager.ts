@@ -162,6 +162,11 @@ export class PtyManager {
     this.sessions.delete(id);
   }
 
+  /** Number of live (not yet exited) PTY sessions. */
+  get liveCount(): number {
+    return this.sessions.size;
+  }
+
   killAll(): void {
     for (const id of [...this.sessions.keys()]) this.kill(id);
   }
